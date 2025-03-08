@@ -1,0 +1,62 @@
+#!/bin/sh
+
+. /lib/functions.sh
+. /lib/functions/uci-defaults.sh
+. /lib/functions/system.sh
+
+mediatek_setup_interfaces()
+{
+	local board="$1"
+
+	case $board in
+	bananapi,bpi-r64-rootdisk|\
+	bananapi,bpi-r64)
+		ucidef_set_interfaces_lan_wan "lan0 lan1 lan2 lan3" wan
+		;;
+	mediatek,mt7622-rfb1)
+		ucidef_set_interfaces_lan_wan "lan1 lan2 lan3 lan4" wan
+		;;
+	ubnt,unifi-6-lr)
+		ucidef_set_interfaces_lan "eth0"
+		;;
+	xiaomi,redmi-router-ax6s)
+		ucidef_add_switch "switch0" \
+			"4:lan:2" "3:lan:3" "2:lan:4" "1:wan" "6t@eth0" 
+		ucidef_set_interfaces_lan_wan "ra0 rai0 eth0.1" "eth0.2"
+		;;
+	*)
+		ucidef_set_interfaces_lan_wan "ra0 rai0 eth0.1" "eth0.2"
+		ucidef_add_switch "switch0" \
+			"1:lan" "2:lan" "3:lan" "4:lan" "5:wan" "6t@eth0"
+		;;
+	esac
+}
+
+mediatek_setup_macs()
+{
+	local board="$1"
+
+	case $board in
+	xiaomi,redmi-router-ax6s)
+		wan_mac=$(mtd_get_mac_ascii bdata ethaddr_wan)
+		label_mac=$wan_mac
+		;;
+	netgear,wax206)
+ 		wan_mac=$(mtd_get_mac_binary factory 0x7fff4)
+ 		lan_mac=$(macaddr_add "$wan_mac" 1)
+ 		;;
+	esac
+
+	[ -n "$lan_mac" ] && ucidef_set_interface_macaddr "lan" $lan_mac
+	[ -n "$wan_mac" ] && ucidef_set_interface_macaddr "wan" $wan_mac
+	[ -n "$label_mac" ] && ucidef_set_label_macaddr $label_mac
+
+}
+
+board_config_update
+board=$(board_name)
+mediatek_setup_interfaces $board
+mediatek_setup_macs $board
+board_config_flush
+
+exit 0

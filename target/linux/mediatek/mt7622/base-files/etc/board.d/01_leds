@@ -1,0 +1,20 @@
+#!/bin/sh
+#
+# Copyright © 2017 OpenWrt.org
+#
+
+. /lib/functions/uci-defaults.sh
+
+board_config_update
+
+case "$(board_name)" in
+xiaomi,redmi-router-ax6s)
+	ucidef_set_led_netdev "wan" "eth0" "blue:net" "eth0"
+	;;
+netgear,wax206)
+	ucidef_set_led_netdev "wan" "eth0" "inet:green" "eth0"
+	;;
+esac
+board_config_flush
+
+exit 0
