@@ -1,0 +1,12 @@
+#!/bin/sh
+
+boot_version=`fw_printenv | grep boot_version | cut -d "=" -f 2`
+
+
+if [ -z "$boot_version" ] 
+then
+	echo "up boot"
+	echo "need up boot" > /tmp/upboot
+	mtd write /lib/upgrade/u-boot-mtk.bin Bootloader
+	fw_setenv invaild_env yes
+fi

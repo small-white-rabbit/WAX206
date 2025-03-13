@@ -1,0 +1,134 @@
+--- a/drivers/net/ethernet/mediatek/mtk_eth_soc.c
++++ b/drivers/net/ethernet/mediatek/mtk_eth_soc.c
+@@ -1309,6 +1309,7 @@ static int mtk_poll_rx(struct napi_struc
+ #if defined(CONFIG_NET_MEDIATEK_HNAT) || defined(CONFIG_NET_MEDIATEK_HNAT_MODULE)
+ 		*(u32 *)(skb->head) = trxd.rxd4;
+ 		skb_hnat_alg(skb) = 0;
++		skb_hnat_filled(skb) = 0;
+ 		skb_hnat_magic_tag(skb) = HNAT_MAGIC_TAG;
+ 		if (skb_hnat_reason(skb) == HIT_BIND_FORCE_TO_CPU) {
+ 			trace_printk("[%s] reason=0x%x(force to CPU) from WAN to Ext\n",
+--- a/drivers/net/ethernet/mediatek/mtk_hnat/hnat_nf_hook.c
++++ b/drivers/net/ethernet/mediatek/mtk_hnat/hnat_nf_hook.c
+@@ -659,7 +659,7 @@ static unsigned int is_ppe_support_type(
+ 	struct iphdr _iphdr;
+ 
+ 	eth = eth_hdr(skb);
+-	if (is_broadcast_ether_addr(eth->h_dest))
++	if (is_multicast_ether_addr(eth->h_dest))
+ 		return 0;
+ 
+ 	switch (ntohs(skb->protocol)) {
+@@ -1032,7 +1032,8 @@ struct foe_entry ppe_fill_info_blk(struc
+ 	switch (entry.bfib1.pkt_type) {
+ 	case IPV4_HNAPT:
+ 	case IPV4_HNAT:
+-		if (is_multicast_ether_addr(&eth->h_dest[0])) {
++		if (hnat_priv->data->mcast &&
++		    is_multicast_ether_addr(&eth->h_dest[0])) {
+ 			entry.ipv4_hnapt.iblk2.mcast = 1;
+ 			if (hnat_priv->data->version == MTK_HNAT_V3)
+ 			{
+@@ -1049,7 +1050,8 @@ struct foe_entry ppe_fill_info_blk(struc
+ 	case IPV6_6RD:
+ 	case IPV6_5T_ROUTE:
+ 	case IPV6_3T_ROUTE:
+-		if (is_multicast_ether_addr(&eth->h_dest[0])) {
++		if (hnat_priv->data->mcast &&
++		    is_multicast_ether_addr(&eth->h_dest[0])) {
+ 			entry.ipv6_5t_route.iblk2.mcast = 1;
+ 			if (hnat_priv->data->version == MTK_HNAT_V3)
+ 			{
+@@ -1095,11 +1097,11 @@ static unsigned int skb_to_hnat_info(str
+ 		eth = (struct ethhdr *)(skb->data - ETH_HLEN);
+ 	else
+ 		eth = eth_hdr(skb);
+-	if (is_multicast_ether_addr(eth->h_dest)) {
+-		/*do not bind multicast if PPE mcast not enable*/
+-		if (!hnat_priv->pmcast)
+-			return 0;
+-	}
++
++	/*do not bind multicast if PPE mcast not enable*/
++	if (!hnat_priv->data->mcast && is_multicast_ether_addr(eth->h_dest))
++		return 0;
++
+ 	entry.bfib1.pkt_type = foe->udib1.pkt_type; /* Get packte type state*/
+ 	switch (ntohs(eth->h_proto)) {
+ 	case ETH_P_IP:
+@@ -1507,6 +1509,8 @@ static unsigned int skb_to_hnat_info(str
+ 	if (!whnat)
+ 		foe->bfib1.state = BIND;
+ 
++	skb_hnat_filled(skb) = HNAT_INFO_FILLED;
++
+ 	return 0;
+ }
+ 
+@@ -1515,7 +1519,8 @@ int mtk_sw_nat_hook_tx(struct sk_buff *s
+ 	struct foe_entry *entry;
+ 	struct ethhdr *eth;
+ 
+-	if (skb_hnat_alg(skb) || !is_magic_tag_valid(skb) || !IS_SPACE_AVAILABLE_HEAD(skb))
++	if (skb_hnat_alg(skb) || !is_hnat_info_filled(skb) ||
++	    !is_magic_tag_valid(skb) || !IS_SPACE_AVAILABLE_HEAD(skb))
+ 		return NF_ACCEPT;
+ 
+ 	trace_printk(
+@@ -1535,10 +1540,16 @@ int mtk_sw_nat_hook_tx(struct sk_buff *s
+ 		return NF_ACCEPT;
+ 
+ 	eth = eth_hdr(skb);
+-	if (is_multicast_ether_addr(eth->h_dest)) {
+-		/*not bind multicast if PPE mcast not enable*/
+-		if (!hnat_priv->pmcast)
+-			return NF_ACCEPT;
++
++	/*not bind multicast if PPE mcast not enable*/
++	if (!hnat_priv->data->mcast) {
++		if (is_multicast_ether_addr(eth->h_dest))
++ 			return NF_ACCEPT;
++
++		if (IS_IPV4_GRP(entry))
++			entry->ipv4_hnapt.iblk2.mcast = 0;
++		else
++			entry->ipv6_5t_route.iblk2.mcast = 0;
+ 	}
+ 
+ 	/* Some mt_wifi virtual interfaces, such as apcli,
+--- a/drivers/net/ethernet/mediatek/mtk_hnat/nf_hnat_mtk.h
++++ b/drivers/net/ethernet/mediatek/mtk_hnat/nf_hnat_mtk.h
+@@ -29,7 +29,8 @@ struct hnat_desc {
+ 	u32 rev : 1;
+ 	u32 alg : 1;
+ 	u32 iface : 4;
+-	u32 resv : 4;
++	u32 filled : 3;
++	u32 resv : 1;
+ 	u32 magic_tag_protect : 16;
+ 	u32 wdmaid : 8;
+ 	u32 rxid : 2;
+@@ -45,6 +46,7 @@ struct hnat_desc {
+ #endif
+ 
+ #define HNAT_MAGIC_TAG 0x6789
++#define HNAT_INFO_FILLED 0x7
+ #define WIFI_INFO_LEN 3
+ #define FOE_INFO_LEN (10 + WIFI_INFO_LEN)
+ #define IS_SPACE_AVAILABLE_HEAD(skb)                                           \
+@@ -57,6 +59,7 @@ struct hnat_desc {
+ #define skb_hnat_sport(skb) (((struct hnat_desc *)(skb->head))->sport)
+ #define skb_hnat_alg(skb) (((struct hnat_desc *)(skb->head))->alg)
+ #define skb_hnat_iface(skb) (((struct hnat_desc *)(skb->head))->iface)
++#define skb_hnat_filled(skb) (((struct hnat_desc *)(skb->head))->filled)
+ #define skb_hnat_magic_tag(skb) (((struct hnat_desc *)((skb)->head))->magic_tag_protect)
+ #define skb_hnat_wdma_id(skb) (((struct hnat_desc *)((skb)->head))->wdmaid)
+ #define skb_hnat_rx_id(skb) (((struct hnat_desc *)((skb)->head))->rxid)
+@@ -67,6 +70,7 @@ struct hnat_desc {
+ #define clr_from_extge(skb) (HNAT_SKB_CB2(skb)->magic = 0x0)
+ #define set_to_ppe(skb) (HNAT_SKB_CB2(skb)->magic = 0x78681415)
+ #define is_from_extge(skb) (HNAT_SKB_CB2(skb)->magic == 0x78786688)
++#define is_hnat_info_filled(skb) (skb_hnat_filled(skb) == HNAT_INFO_FILLED)
+ #define is_magic_tag_valid(skb) (skb_hnat_magic_tag(skb) == HNAT_MAGIC_TAG)
+ #define set_from_mape(skb) (HNAT_SKB_CB2(skb)->magic = 0x78787788)
+ #define is_from_mape(skb) (HNAT_SKB_CB2(skb)->magic == 0x78787788)

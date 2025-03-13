@@ -1,0 +1,36 @@
+#!/bin/sh
+wan_pptp=`/sbin/uci get network.vpn.proto` 2> /dev/null
+wanproto_status=`/sbin/uci get network.wan.proto` 2> /dev/null
+wanproto_status=${wan_pptp:-$wanproto_status}
+
+wandemand_vpn=`/sbin/uci get network.vpn.demand` 2> /dev/null
+wandemand_wan=`/sbin/uci get network.wan.demand` 2> /dev/null
+wandemand_wan=${wandemand_vpn:-$wandemand_wan}
+
+wandod_vpn=`/sbin/uci get network.vpn.pppdod` 2> /dev/null
+wandod_wan=`/sbin/uci get network.wan.pppdod` 2> /dev/null
+wandod_wan=${wandod_vpn:-$wandod_wan}
+
+if [ "$wanproto_status" = "pppoe" -o "$wanproto_status" = "pptp" -o "$wanproto_status" = "l2tp" ];then
+    if [ "${wandemand_wan:-0}" -gt 0 -a "${wandod_wan:-0}" -eq 1 ];then
+        if [ "$wanproto_status" = "pppoe" ];then
+            ip route add default dev pppoe-wan
+        elif [ "$wanproto_status" = "pptp" ];then
+            ip route add default dev pptp-vpn
+        else
+            ip route add default dev l2tp-vpn
+        fi
+
+        route_op=$(uci get system.logs.log_router_op)
+        if [ $route_op -eq 1 ];then
+            if [ -f /tmp/ntp_sync_ok ];then
+                /usr/bin/redis-cli -s /tmp/.redis.sock LPUSH logs "[Internet idle-timeout] $(date +"%A, %B %d, %Y %H:%M:%S")"
+            else
+                /usr/bin/redis-cli -s /tmp/.redis.sock LPUSH logs "[Internet idle-timeout] TIME::$(cat /proc/uptime | awk -F'.' '{print $1}')"
+            fi
+            /usr/bin/redis-cli -s /tmp/.redis.sock LTRIM logs 0 1023
+        fi
+    fi
+    cp /tmp/resolv.conf.ppp /tmp/resolv.conf.auto
+    chmod 644 /tmp/resolv.conf.auto
+fi

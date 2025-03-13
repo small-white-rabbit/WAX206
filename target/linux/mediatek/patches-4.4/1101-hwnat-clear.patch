@@ -1,0 +1,93 @@
+From 7d5081a95f9309e4d6648bc55c385879e55084ad Mon Sep 17 00:00:00 2001
+From: hudawei <hudawei@twsh.com>
+Date: Thu, 5 Aug 2021 19:49:01 +0800
+Subject: [PATCH] hwnat clear
+
+---
+ .../ethernet/mediatek/mtk_hnat/hnat_debugfs.c | 26 ++++++++++++++++++-
+ .../ethernet/mediatek/mtk_hnat/hnat_nf_hook.c | 24 +++++++++++++++++
+ 2 files changed, 49 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/net/ethernet/mediatek/mtk_hnat/hnat_debugfs.c b/drivers/net/ethernet/mediatek/mtk_hnat/hnat_debugfs.c
+index 1a8980f0..cffa1abf 100644
+--- a/drivers/net/ethernet/mediatek/mtk_hnat/hnat_debugfs.c
++++ b/drivers/net/ethernet/mediatek/mtk_hnat/hnat_debugfs.c
+@@ -1659,6 +1659,28 @@ static const struct file_operations hnat_mape_toggle_fops = {
+ 	.release = single_release,
+ };
+ 
++static int hnat_table_clear_open(struct inode *inode, struct file *file)
++{
++    return single_open(file, hnat_mape_toggle_read, file->private_data);
++}
++
++extern void foe_clear_all_bind_entries2(void);
++
++static ssize_t hnat_table_clear_write(struct file *file, const char __user *buffer,
++                                     size_t count, loff_t *data)
++{
++    foe_clear_all_bind_entries2();
++
++    return count;
++}
++
++static const struct file_operations hnat_table_clear_fops = {
++    .open = hnat_table_clear_open,
++    .llseek = seq_lseek,
++    .write = hnat_table_clear_write,
++    .release = single_release,
++};
++
+ static int hnat_hook_toggle_read(struct seq_file *m, void *private)
+ {
+ 	pr_info("value=%d, hook is %s now!\n", hook_toggle, (hook_toggle) ? "enabled" : "disabled");
+@@ -1842,8 +1864,10 @@ int __init hnat_init_debugfs(struct mtk_hnat *h)
+ 			    &hnat_version_fops);
+ 	debugfs_create_file("hnat_ppd_if", S_IRUGO | S_IRUGO, root, h,
+ 			    &hnat_ppd_if_fops);
++    debugfs_create_file("hnat_clear", S_IRUGO | S_IRUGO, root, h,
++                        &hnat_table_clear_fops);
+ 
+-	for (i = 0; i < hnat_priv->data->num_of_sch; i++) {
++    for (i = 0; i < hnat_priv->data->num_of_sch; i++) {
+ 		snprintf(name, sizeof(name), "qdma_sch%ld", i);
+ 		debugfs_create_file(name, S_IRUGO, root, (void *)i,
+ 				    &hnat_sched_fops);
+diff --git a/drivers/net/ethernet/mediatek/mtk_hnat/hnat_nf_hook.c b/drivers/net/ethernet/mediatek/mtk_hnat/hnat_nf_hook.c
+index 79e966ca..1c1003cd 100644
+--- a/drivers/net/ethernet/mediatek/mtk_hnat/hnat_nf_hook.c
++++ b/drivers/net/ethernet/mediatek/mtk_hnat/hnat_nf_hook.c
+@@ -203,6 +203,30 @@ void foe_clear_all_bind_entries(struct net_device *dev)
+ 	mod_timer(&hnat_priv->hnat_sma_build_entry_timer, jiffies + 3 * HZ);
+ }
+ 
++void foe_clear_all_bind_entries2(void)
++{
++    int hash_index;
++    struct foe_entry *entry;
++
++    cr_set_field(hnat_priv->ppe_base + PPE_TB_CFG, SMA, SMA_ONLY_FWD_CPU);
++    for (hash_index = 0; hash_index < hnat_priv->foe_etry_num; hash_index++)
++    {
++        entry = hnat_priv->foe_table_cpu + hash_index;
++        if (entry->bfib1.state == BIND)
++        {
++            entry->ipv4_hnapt.udib1.state = INVALID;
++            entry->ipv4_hnapt.udib1.time_stamp =
++                readl((hnat_priv->fe_base + 0x0010)) & 0xFF;
++        }
++    }
++
++    /* clear HWNAT cache */
++    hnat_cache_ebl(1);
++
++    mod_timer(&hnat_priv->hnat_sma_build_entry_timer, jiffies + 3 * HZ);
++}
++EXPORT_SYMBOL(foe_clear_all_bind_entries2);
++
+ static void gmac_ppe_fwd_enable(struct net_device *dev)
+ {
+ 	if (IS_LAN(dev) || IS_GMAC1_MODE)
+-- 
+2.17.1
+

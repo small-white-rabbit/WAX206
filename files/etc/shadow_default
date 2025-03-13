@@ -1,0 +1,6 @@
+root:$6$6BW7sSvwFz5a10VG$O4ciz6VlTmlgd65fxAPyIsfygF6VUZFQUcFXkP6wuHFviup9xk35JX0vRJNYflr65WNItkyrrJvb5edphAmaB.:18719:0:99999:7:::
+admin:$6$qgqBcL5LPaB4vI0G$zcHoHMWtx2HrdItos9TxoAVGmE.M5NaUxn46WVJA5enq3GrlKN3t9R7la2Msq3kp5eQjiSx7wjbwNLFoty6uw1:18646:0:99999:7:::
+daemon:*:0:0:99999:7:::
+ftp:*:0:0:99999:7:::
+network:*:0:0:99999:7:::
+nobody:*:0:0:99999:7:::

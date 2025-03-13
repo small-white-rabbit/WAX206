@@ -1,0 +1,698 @@
+From 9db20e38aaeaaf19b68a8154f4ae0b6323489584 Mon Sep 17 00:00:00 2001
+From: hudawei <hudawei@twsh.com>
+Date: Fri, 27 Nov 2020 16:09:41 +0800
+Subject: [PATCH] add pkt_redirect
+
+---
+ include/linux/pkt_redirect.h |  90 ++++++
+ net/netlink/Makefile         |   2 +-
+ net/netlink/pkt_redirect.c   | 567 +++++++++++++++++++++++++++++++++++
+ 3 files changed, 658 insertions(+), 1 deletion(-)
+ create mode 100755 include/linux/pkt_redirect.h
+ create mode 100755 net/netlink/pkt_redirect.c
+
+diff --git a/include/linux/pkt_redirect.h b/include/linux/pkt_redirect.h
+new file mode 100755
+index 00000000..8ad1da4f
+--- /dev/null
++++ b/include/linux/pkt_redirect.h
+@@ -0,0 +1,90 @@
++#ifndef __PKT_REDIRECT_H__
++#define __PKT_REDIRECT_H__
++
++#define PKT_REDIRECT_OPTYPE_NONE            0x00
++#define PKT_REDIRECT_OPTYPE_REGISTER        0x01
++#define PKT_REDIRECT_OPTYPE_SEND_MSG        0x02 /* Send message between kernel/user */
++
++#define PKT_REDIRECT_REGTYPE_REGISTER       0x01
++#define PKT_REDIRECT_REGTYPE_DEREGISTER     0x02
++
++#define PR_DATA(prData)     (((unsigned char *)prData) + sizeof(pr_data_t))
++
++#define MAX_DEFAULT_PAYLOAD (2000)
++
++enum {
++    PR_USER_UID_RESERVE = 0,
++    PR_USER_UID_1 = 1,
++    PR_USER_UID_2 = 2,
++    PR_USER_UID_3 = 3,
++    PR_USER_UID_4 = 4,
++    PR_USER_UID_5 = 5,
++    PR_USER_UID_6 = 6,
++    PR_USER_UID_7 = 7,
++    PR_USER_UID_8 = 8,
++    PR_USER_UID_END
++};
++
++enum {
++    PR_KERNEL_UID_RESERVE = 0,
++    PR_KERNEL_UID_1 = 1,
++    PR_KERNEL_UID_2 = 2,
++    PR_KERNEL_UID_3 = 3,
++    PR_KERNEL_UID_4 = 4,
++    PR_KERNEL_UID_5 = 5,
++    PR_KERNEL_UID_6 = 6,
++    PR_KERNEL_UID_END
++};
++
++
++/* Define the communication structures */
++/* Data type for user -> kernel */
++typedef struct pr_identifier_s {
++    unsigned short prOpType;   /* Packet redirect operation type */
++    unsigned short uid;        /* User ID - assigned by kernel/user program itself */
++    int            pid;        /* Process ID - always 0 for kernel modules */
++    /* ---------------------- */
++} pr_identifier_t;
++
++typedef struct pr_data_s {
++    unsigned short prOpType;   /* Packet redirect operation type */
++    unsigned short uid;        /* User ID */
++    int            isUser;
++    /* ---------------------- */
++    unsigned int   flag;       /* Flag */
++    unsigned int   dataLen;    /* length */
++    /* ---------------------- */
++    /* Data */
++} pr_data_t;
++
++typedef struct pr_regUserApp_s {
++    unsigned short prOpType;   /* Packet redirect operation type */
++    unsigned short ownUid;     /* User ID */
++    int            ownPid;     /* Process ID */
++    /* ---------------------- */
++    unsigned char  regType;    /* Register type */
++    unsigned short mtu;        /* Maximum data size */
++} pr_regUserApp_t;
++
++typedef struct pr_regKernelApp_s {
++    unsigned short prOpType;   /* Packet redirect operation type */
++    unsigned short uid;        /* User ID - assigned by kernel/user program itself */
++    int            pid;        /* Process ID */
++    /* ---------------------- */
++    unsigned char  regType;    /* Register type */
++    void (*appCallback)(void *data); /* Kernel application call back function */
++} pr_regKernelApp_t;
++
++int pkt_redirect_kernelApp_reg(
++    unsigned short uid,
++    void (*appCallback)(unsigned short dataLen, unsigned char *data));
++int pkt_redirect_kernelApp_dereg(
++    unsigned short uid);
++int pkt_redirect_kernelApp_sendPkt(
++    unsigned short dstUid,
++    int            isUser,
++    unsigned short dataLen,
++    unsigned char *data);
++
++#endif /* __PKT_REDIRECT_H__ */
++
+diff --git a/net/netlink/Makefile b/net/netlink/Makefile
+index e837917f..e2c99693 100644
+--- a/net/netlink/Makefile
++++ b/net/netlink/Makefile
+@@ -2,7 +2,7 @@
+ # Makefile for the netlink driver.
+ #
+ 
+-obj-y  				:= af_netlink.o genetlink.o
++obj-y  				:= af_netlink.o genetlink.o pkt_redirect.o
+ 
+ obj-$(CONFIG_NETLINK_DIAG)	+= netlink_diag.o
+ netlink_diag-y			:= diag.o
+diff --git a/net/netlink/pkt_redirect.c b/net/netlink/pkt_redirect.c
+new file mode 100755
+index 00000000..d6b987ad
+--- /dev/null
++++ b/net/netlink/pkt_redirect.c
+@@ -0,0 +1,567 @@
++/*
++ * Copyright (C) 2012 Realtek Semiconductor Corp.
++ * All Rights Reserved.
++ *
++ * This program is the proprietary software of Realtek Semiconductor
++ * Corporation and/or its licensors, and only be used, duplicated,
++ * modified or distributed under the authorized license from Realtek.
++ *
++ * ANY USE OF THE SOFTWARE OTHER THAN AS AUTHORIZED UNDER
++ * THIS LICENSE OR COPYRIGHT LAW IS PROHIBITED.
++ *
++ * $Revision: 54165 $
++ * $Date: 2014-12-23 15:50:15 +0800 (Tue, 23 Dec 2014) $
++ *
++ * Purpose : Definie the device driver that communication between
++ *           kernel space and user space
++ *
++ * Feature : Provide kernel space APIs and actual data exchange
++ *           source
++ *
++ */
++
++/*
++ * Include Files
++ */
++#include <linux/module.h> 
++#include <linux/kernel.h> 
++#include <linux/init.h> 
++#include <net/sock.h> 
++#include <net/netlink.h> 
++#include <linux/skbuff.h>
++#include <linux/version.h>
++#include <linux/pkt_redirect.h>
++
++/* 
++ * Symbol Definition 
++ */
++/* The data base typedef only used in this file */
++/* For user space application */
++typedef struct pr_userAppDb_s {
++    unsigned short uid;        /* User ID */
++    int            pid;        /* Process ID */
++    unsigned short mtu;        /* Maximum data size */
++    struct pr_userAppDb_s *prev;
++    struct pr_userAppDb_s *next;
++} pr_userAppDb_t;
++
++/* For kernel space application */
++typedef struct pr_kernelAppDb_s {
++    unsigned short uid;        /* User ID - assigned by kernel/user program itself */
++    void (*appCallback)(unsigned short dataLen, unsigned char *data); /* Kernel application call back function */
++    struct pr_kernelAppDb_s *prev;
++    struct pr_kernelAppDb_s *next;
++} pr_kernelAppDb_t;
++
++/*  
++ * Data Declaration  
++ */
++
++struct sock *session_sock[PR_USER_UID_END] = {NULL};
++
++EXPORT_SYMBOL(session_sock);
++static pr_userAppDb_t *userAppDb;
++static pr_kernelAppDb_t *kernelAppDb;
++
++/*  
++ * Function Declaration  
++ */
++
++/* ------------------------------------------------------------------
++ * Device driver kernel part internal APIs
++ */
++static int pkt_redirect_userApp_add(pr_regUserApp_t *regData)
++{
++    pr_userAppDb_t *userApp, *searchPtr;
++
++    userApp = (pr_userAppDb_t *) kmalloc(sizeof(pr_userAppDb_t), GFP_KERNEL);
++    if(NULL == userApp)
++    {
++        return -1;
++    }
++
++    userApp->uid = regData->ownUid;
++    userApp->pid = regData->ownPid;
++    userApp->mtu = regData->mtu;
++    userApp->prev = NULL;
++    userApp->next = NULL;
++
++    if(NULL == userAppDb)
++    {
++        userAppDb = userApp;
++        userApp->prev = NULL;
++    }
++    else
++    {
++        searchPtr = userAppDb;
++        while(NULL != searchPtr)
++        {
++            if(searchPtr->uid == regData->ownUid)
++            {
++                /* Update MTU and PID */
++                searchPtr->pid = regData->ownPid;
++                searchPtr->mtu = regData->mtu;
++                kfree(userApp);
++
++                return 0;
++            }
++	     if( NULL == searchPtr->next)
++	     {
++	     	  break;
++	     }
++            searchPtr = searchPtr->next;
++        }
++        searchPtr->next = userApp;
++        userApp->prev = searchPtr;
++        userApp->next = NULL;
++    }
++
++    return 0;
++}
++
++static pr_userAppDb_t *pkt_redirect_userApp_get(unsigned short uid)
++{
++    pr_userAppDb_t *searchPtr;
++
++    searchPtr = userAppDb;
++    while(NULL != searchPtr)
++    {
++        if(searchPtr->uid == uid)
++        {
++            return searchPtr;
++        }
++        searchPtr = searchPtr->next;
++    }
++
++    return NULL;
++}
++
++static int pkt_redirect_userApp_del(pr_regUserApp_t *regData)
++{
++    pr_userAppDb_t *userApp, *searchPtr;
++
++    searchPtr = userAppDb;
++    while(NULL != searchPtr)
++    {
++        if((searchPtr->uid == regData->ownUid) &&
++            (searchPtr->pid == regData->ownPid))
++        {
++            userApp = searchPtr;
++            if(searchPtr->prev == NULL && searchPtr->next == NULL)
++            {
++                userAppDb = NULL;
++            }
++            else
++            {
++                if(searchPtr->prev != NULL)
++                {
++                    searchPtr->prev->next = searchPtr->next;
++                }
++                if(searchPtr->next != NULL)
++                {
++                    searchPtr->next->prev = searchPtr->prev;
++                }
++                if(userAppDb == searchPtr)
++                {
++                    userAppDb = searchPtr->next;
++                }
++                userApp->prev = NULL;
++                userApp->next = NULL;
++            }
++            kfree(userApp);
++
++            return 0;
++        }
++        searchPtr = searchPtr->next;
++    }
++
++    return -1;
++}
++
++static int pkt_redirect_userApp_delAll(void)
++{
++    pr_userAppDb_t *userApp, *searchPtr;
++
++    searchPtr = userAppDb;
++    while(NULL != searchPtr)
++    {
++        userApp = searchPtr;
++        searchPtr = searchPtr->next;
++        kfree(userApp);
++    }
++    userAppDb = NULL;
++
++    return 0;
++}
++
++static int pkt_redirect_kernelApp_add(unsigned short uid, void (*appCallback)(unsigned short dataLen, unsigned char *data))
++{
++    pr_kernelAppDb_t *kernelApp, *searchPtr;
++
++    kernelApp = (pr_kernelAppDb_t *) kmalloc(sizeof(pr_kernelAppDb_t), GFP_KERNEL);
++
++    if(NULL == kernelApp)
++    {
++        return -1;
++    }
++
++    kernelApp->uid = uid;
++    kernelApp->appCallback = appCallback;
++    kernelApp->prev = NULL;
++    kernelApp->next = NULL;
++    if(NULL == kernelAppDb)
++    {
++        kernelAppDb = kernelApp;
++        kernelApp->prev = NULL;
++    }
++    else
++    {
++        searchPtr = kernelAppDb;
++        while(NULL != searchPtr)
++        {
++            if(searchPtr->uid == uid)
++            {
++                /* Update callback function only */
++                searchPtr->appCallback = appCallback;
++                kfree(kernelApp);
++
++                return 0;
++            }
++	     if( NULL == searchPtr->next)
++	     {
++	     	  break;
++	     }
++            searchPtr = searchPtr->next;
++        }
++        searchPtr->next = kernelApp;
++        kernelApp->prev = searchPtr;
++        kernelApp->next = NULL;
++    }
++
++    return 0;
++}
++
++static pr_kernelAppDb_t *pkt_redirect_kernelApp_get(unsigned short uid)
++{
++    pr_kernelAppDb_t *searchPtr;
++
++    searchPtr = kernelAppDb;
++    while(NULL != searchPtr)
++    {
++        if(searchPtr->uid == uid)
++        {
++            return searchPtr;
++        }
++        searchPtr = searchPtr->next;
++    }
++
++    return NULL;
++}
++
++static int pkt_redirect_kernelApp_del(unsigned short uid)
++{
++    pr_kernelAppDb_t *kernelApp, *searchPtr;
++
++    searchPtr = kernelAppDb;
++    while(NULL != searchPtr)
++    {
++        if(searchPtr->uid == uid)
++        {
++            kernelApp = searchPtr;
++            if(searchPtr->prev == NULL && searchPtr->next == NULL)
++            {
++                kernelAppDb = NULL;
++            }
++            else
++            {
++                if(searchPtr->prev != NULL)
++                {
++                    searchPtr->prev->next = searchPtr->next;
++                }
++                if(searchPtr->next != NULL)
++                {
++                    searchPtr->next->prev = searchPtr->prev;
++                }
++                if(kernelAppDb == searchPtr)
++                {
++                    kernelAppDb = searchPtr->next;
++                }
++                kernelApp->prev = NULL;
++                kernelApp->next = NULL;
++            }
++            kfree(kernelApp);
++
++            return 0;
++        }
++        searchPtr = searchPtr->next;
++    }
++
++    return -1;
++}
++
++static int pkt_redirect_kernelApp_delAll(void)
++{
++    pr_kernelAppDb_t *kernelApp, *searchPtr;
++
++    searchPtr = kernelAppDb;
++    while(NULL != searchPtr)
++    {
++        kernelApp = searchPtr;
++        searchPtr = searchPtr->next;
++        kfree(kernelApp);
++    }
++    kernelAppDb = NULL;
++
++    return 0;
++}
++
++static int pkt_redirect_send2User(
++    pr_userAppDb_t *userApp,
++    unsigned short dataLen,
++    unsigned char *payload)
++{
++    struct sk_buff *skb;
++    struct nlmsghdr *nlh;
++    int len;
++    void *data;
++    int ret;
++
++    if((NULL == userApp) || (NULL == payload))
++    {
++        return -1;
++    }
++
++    len = NLMSG_SPACE(dataLen);
++    skb = alloc_skb(len, GFP_ATOMIC);
++    if (!skb)
++    {
++        return -3;
++    }
++    nlh = nlmsg_put(skb, userApp->pid, 0, 0, dataLen, 0);
++    nlh->nlmsg_flags = 0;
++    data = NLMSG_DATA(nlh);
++    memcpy(data, payload, dataLen);
++#if LINUX_VERSION_CODE < KERNEL_VERSION(3,7,0)
++    NETLINK_CB(skb).pid = 0; /* from kernel */ 
++#endif
++    NETLINK_CB(skb).dst_group = 0; /* unicast */
++
++    if (userApp->uid > PR_USER_UID_END)
++    {
++        goto nlmsg_failure;
++    }
++
++    ret = netlink_unicast(session_sock[userApp->uid], skb, userApp->pid, MSG_DONTWAIT);
++    if (ret < 0) 
++    { 
++        return -4;
++    } 
++    return 0;
++     
++    nlmsg_failure: /* Used by NLMSG_PUT */ 
++    if (skb)
++    {
++        kfree_skb(skb);
++    }
++    return -5;
++}
++
++static void pkt_redirect_recv(struct sk_buff *skb)
++{
++    int ret;
++#if LINUX_VERSION_CODE < KERNEL_VERSION(3, 7, 0)
++    u_int uid, pid, seq, sid;
++#else
++    u_int pid, seq;
++#endif
++    unsigned int dataLen;
++    void *data;
++    struct nlmsghdr *nlh;
++    pr_identifier_t *prId;
++    pr_regUserApp_t *regData;
++    pr_data_t *sendData;
++
++    nlh = (struct nlmsghdr *)skb->data;
++    pid = NETLINK_CREDS(skb)->pid;
++#if LINUX_VERSION_CODE < KERNEL_VERSION(3,7,0)
++    uid = NETLINK_CREDS(skb)->uid;
++    sid = NETLINK_CB(skb).sid;
++#endif
++    seq = nlh->nlmsg_seq;
++    data = NLMSG_DATA(nlh);
++    dataLen = nlh->nlmsg_len;
++    //printk("recv skb from user space uid:%d pid:%d seq:%d,sid:%d\n", uid, pid, seq, sid);
++
++    prId = (pr_identifier_t *) data;
++    //printk("OpType:%u pid:%d uid:%d\n", prId->prOpType, prId->pid, prId->uid);
++
++    /* Check the packet prOpType to decide operation */
++    switch(prId->prOpType)
++    {
++    case PKT_REDIRECT_OPTYPE_SEND_MSG:
++        sendData = (pr_data_t *) data;
++        //printk("PKT_REDIRECT_OPTYPE_SEND\n");
++        //printk("uid: %u\n", sendData->uid);
++        //printk("isUser: %d\n", sendData->isUser);
++        //printk("flag: %u\n", sendData->flag);
++        //printk("len: %u\n", sendData->dataLen);
++
++        pkt_redirect_kernelApp_sendPkt(sendData->uid, sendData->isUser, sendData->dataLen, PR_DATA(sendData));
++        break;
++    case PKT_REDIRECT_OPTYPE_REGISTER:
++        /* Register new */
++        regData = (pr_regUserApp_t *) data;
++        if(PKT_REDIRECT_REGTYPE_REGISTER == regData->regType)
++        {
++            ret = pkt_redirect_userApp_add(regData);
++            //printk("PKT_REDIRECT_REGTYPE_REGISTER: %d\n", ret);
++        }
++        else if(PKT_REDIRECT_REGTYPE_DEREGISTER == regData->regType)
++        {
++            ret = pkt_redirect_userApp_del(regData);
++            //printk("PKT_REDIRECT_REGTYPE_DEREGISTER: %d\n", ret);
++        }
++
++#if 0
++        {
++            pr_userAppDb_t *userApp, *searchPtru;
++            pr_kernelAppDb_t *kernelApp, *searchPtrk;
++
++            searchPtru = userAppDb;
++            printk("userApp\n");
++            while(NULL != searchPtru)
++            {
++                userApp = searchPtru;
++                searchPtru = searchPtru->next;
++                printk("uid: %u\n", userApp->uid);
++                printk("pid: %d\n", userApp->pid);
++                printk("mtu: %u\n", userApp->mtu);
++            }
++
++            searchPtrk = kernelAppDb;
++            printk("kernelApp\n");
++            while(NULL != searchPtrk)
++            {
++                kernelApp = searchPtrk;
++                searchPtrk = searchPtrk->next;
++                printk("uid: %u\n", kernelApp->uid);
++                printk("CB: 0x%08x\n", (unsigned int) kernelApp->appCallback);
++            }
++        }
++#endif
++        break;
++    default:
++        break;
++    }
++}
++
++/* ------------------------------------------------------------------
++ * Kernel space APIs for other kernel modules
++ */
++int pkt_redirect_kernelApp_reg(
++    unsigned short uid,
++    void (*appCallback)(unsigned short dataLen, unsigned char *data))
++{
++    return pkt_redirect_kernelApp_add(uid, appCallback);
++}
++
++int pkt_redirect_kernelApp_dereg(
++    unsigned short uid)
++{
++    return pkt_redirect_kernelApp_del(uid);
++}
++
++/* Sender have to prepare the data and free after send */
++int pkt_redirect_kernelApp_sendPkt(
++    unsigned short dstUid,
++    int            isUser,
++    unsigned short dataLen,
++    unsigned char *data)
++{
++    pr_kernelAppDb_t *kernelApp;
++    pr_userAppDb_t *userApp;
++    int ret = 0;
++
++    if(0 == isUser)
++    {
++        /* Kernel app -> kernel app */
++        kernelApp = pkt_redirect_kernelApp_get(dstUid);
++        if(NULL == kernelApp)
++        {
++            /* No such UID registered */
++            return -1;
++        }
++        kernelApp->appCallback(dataLen, data);
++    }
++    else
++    {
++        /* Kernel app -> user app */
++        userApp = pkt_redirect_userApp_get(dstUid);
++        if(NULL == userApp)
++        {
++            /* No such UID/PID registered */
++            return -1;
++        }
++        if(dataLen > userApp->mtu)
++        {
++            /* User app can't receive such large amount of data */
++            return -2;
++        }
++        ret = pkt_redirect_send2User(userApp, dataLen, data);
++    }
++
++    return ret;
++}
++
++/*for debug oam please change to 0x3F*/
++
++
++int __init pkt_redirect_init(void)
++{
++    unsigned short uid = 0;
++    struct netlink_kernel_cfg cfg =
++    {
++       .groups = 0,
++       .input  = pkt_redirect_recv,
++    };
++
++    for (uid = PR_USER_UID_1; uid < PR_USER_UID_END; uid++)
++    {
++        session_sock[uid] = netlink_kernel_create(&init_net, uid, &cfg);
++    }
++    pkt_redirect_userApp_delAll();
++    pkt_redirect_kernelApp_delAll();
++    userAppDb = NULL;
++    kernelAppDb = NULL;
++    if(NULL == session_sock)
++    {
++        printk("pkt_redirect_init failed!\n");
++    }
++    else
++    {
++        printk("pkt_redirect_init complete\n");
++    }
++
++    return 0;
++}
++
++void __exit pkt_redirect_exit(void)
++{
++    unsigned short uid = 0;
++    
++    pkt_redirect_userApp_delAll();
++    pkt_redirect_kernelApp_delAll();
++    for (uid = PR_USER_UID_1; uid < PR_USER_UID_END; uid++)
++        sock_release(session_sock[uid]->sk_socket);
++}
++
++MODULE_LICENSE("GPL");
++MODULE_DESCRIPTION("RealTek kernel/user packet redirect module");
++MODULE_AUTHOR("Realtek");
++EXPORT_SYMBOL(pkt_redirect_kernelApp_reg);
++EXPORT_SYMBOL(pkt_redirect_kernelApp_dereg);
++EXPORT_SYMBOL(pkt_redirect_kernelApp_sendPkt);
++
++module_init(pkt_redirect_init);
++module_exit(pkt_redirect_exit);
++
+-- 
+2.17.1
+

@@ -1,0 +1,170 @@
+--- a/drivers/net/ethernet/mediatek/mtk_eth_soc.c
++++ b/drivers/net/ethernet/mediatek/mtk_eth_soc.c
+@@ -619,6 +619,7 @@ err_phy:
+ static int mtk_mdio_init(struct mtk_eth *eth)
+ {
+ 	struct device_node *mii_np;
++	u32 val;
+ 	int ret;
+ 
+ 	mii_np = of_get_child_by_name(eth->dev->of_node, "mdio-bus");
+@@ -644,6 +645,10 @@ static int mtk_mdio_init(struct mtk_eth
+ 	eth->mii_bus->priv = eth;
+ 	eth->mii_bus->parent = eth->dev;
+ 
++	/* Disable PHY auto-polling to avoid mdio access from HW */
++	val = mtk_r32(eth, MTK_PHY_PSC);
++	mtk_w32(eth, val & ~PHY_AP_EN, MTK_PHY_PSC);
++
+ 	snprintf(eth->mii_bus->id, MII_BUS_ID_SIZE, "%s", mii_np->name);
+ 	ret = of_mdiobus_register(eth->mii_bus, mii_np);
+ 
+@@ -2050,8 +2055,8 @@ static irqreturn_t mtk_handle_irq_rx(int
+ 	struct mtk_eth *eth = _eth;
+ 
+ 	if (likely(napi_schedule_prep(&eth->rx_napi))) {
+-		__napi_schedule(&eth->rx_napi);
+ 		mtk_rx_irq_disable(eth, MTK_RX_DONE_INT);
++		__napi_schedule(&eth->rx_napi);
+ 	}
+ 
+ 	return IRQ_HANDLED;
+@@ -2062,8 +2067,8 @@ static irqreturn_t mtk_handle_irq_tx(int
+ 	struct mtk_eth *eth = _eth;
+ 
+ 	if (likely(napi_schedule_prep(&eth->tx_napi))) {
+-		__napi_schedule(&eth->tx_napi);
+ 		mtk_tx_irq_disable(eth, MTK_TX_DONE_INT);
++		__napi_schedule(&eth->tx_napi);
+ 	}
+ 
+ 	return IRQ_HANDLED;
+@@ -2108,20 +2113,24 @@ static int mtk_start_dma(struct mtk_eth
+ 	return 0;
+ }
+ 
+-static void mtk_gdma_config(struct mtk_eth *eth, u32 config)
++static void mtk_gdma_igr_ctrl(struct mtk_eth *eth, u32 gdma, u32 action)
+ {
+-	int i;
++	u32 val = mtk_r32(eth, MTK_GDMA_FWD_CFG(gdma));
++
++	/* default setup the forward port to send frame to PDMA */
++	val &= ~0xffff;
++	val |= action;
+ 
+-	for (i = 0; i < 2; i++) {
+-		u32 val = mtk_r32(eth, MTK_GDMA_FWD_CFG(i));
++	mtk_w32(eth, val, MTK_GDMA_FWD_CFG(gdma));
++}
+ 
+-		/* default setup the forward port to send frame to PDMA */
+-		val &= ~0xffff;
++static void mtk_gdma_config(struct mtk_eth *eth, u32 config)
++{
++	int i;
+ 
+-		val |= config;
++	for (i = 0; i < 2; i++)
++		mtk_gdma_igr_ctrl(eth, i, config);
+ 
+-		mtk_w32(eth, val, MTK_GDMA_FWD_CFG(i));
+-	}
+ 	/*Reset and enable PSE*/
+ 	mtk_w32(eth, RST_GL_PSE, MTK_RST_GL);
+ 	mtk_w32(eth, 0, MTK_RST_GL);
+@@ -2139,7 +2148,6 @@ static int mtk_open(struct net_device *d
+ 		if (err)
+ 			return err;
+ 
+-		mtk_gdma_config(eth, MTK_GDMA_ICS_EN | MTK_GDMA_TCS_EN | MTK_GDMA_UCS_EN);
+ 
+ 		napi_enable(&eth->tx_napi);
+ 		napi_enable(&eth->rx_napi);
+@@ -2151,6 +2159,8 @@ static int mtk_open(struct net_device *d
+ 	phy_start(dev->phydev);
+ 	netif_start_queue(dev);
+ 
++	mtk_gdma_igr_ctrl(eth, mac->id, MTK_GDMA_PDMA_ALL);
++
+ 	return 0;
+ }
+ 
+@@ -2182,6 +2192,8 @@ static int mtk_stop(struct net_device *d
+ 	struct mtk_mac *mac = netdev_priv(dev);
+ 	struct mtk_eth *eth = mac->hw;
+ 
++	mtk_gdma_igr_ctrl(eth, mac->id, MTK_GDMA_DROP_ALL);
++
+ 	netif_tx_disable(dev);
+ 	phy_stop(dev->phydev);
+ 
+@@ -2189,7 +2201,6 @@ static int mtk_stop(struct net_device *d
+ 	if (!atomic_dec_and_test(&eth->dma_refcnt))
+ 		return 0;
+ 
+-	mtk_gdma_config(eth, MTK_GDMA_DROP_ALL);
+ 
+ 	mtk_tx_irq_disable(eth, MTK_TX_DONE_INT);
+ 	mtk_rx_irq_disable(eth, MTK_RX_DONE_INT);
+@@ -2264,6 +2275,7 @@ static int mtk_hw_init(struct mtk_eth *e
+ 	if (ret)
+ 		goto err_disable_pm;
+ 
++	ethsys_reset(eth, RSTCTRL_ETH);
+ 	ethsys_reset(eth, RSTCTRL_FE);
+ 	ethsys_reset(eth, RSTCTRL_PPE);
+ 
+@@ -2359,6 +2371,7 @@ static int __init mtk_init(struct net_de
+ 			dev->dev_addr);
+ 	}
+ 
++	mtk_gdma_config(eth, MTK_GDMA_ICS_EN | MTK_GDMA_TCS_EN | MTK_GDMA_UCS_EN);
+ 	return mtk_phy_connect(dev);
+ }
+ 
+@@ -2372,6 +2385,7 @@ static void mtk_uninit(struct net_device
+ 		of_phy_deregister_fixed_link(mac->of_node);
+ 	mtk_tx_irq_disable(eth, ~0);
+ 	mtk_rx_irq_disable(eth, ~0);
++	mtk_gdma_config(eth, MTK_GDMA_DROP_ALL);
+ }
+ 
+ static int mtk_do_ioctl(struct net_device *dev, struct ifreq *ifr, int cmd)
+@@ -2422,6 +2436,7 @@ static void mtk_pending_work(struct work
+ 		pinctrl_select_state(eth->dev->pins->p,
+ 				     eth->dev->pins->default_state);
+ 	mtk_hw_init(eth);
++	mtk_gdma_config(eth, MTK_GDMA_ICS_EN | MTK_GDMA_TCS_EN | MTK_GDMA_UCS_EN);
+ 
+ 	for (i = 0; i < MTK_MAC_COUNT; i++) {
+ 		if (!eth->mac[i] ||
+--- a/drivers/net/ethernet/mediatek/mtk_eth_soc.h
++++ b/drivers/net/ethernet/mediatek/mtk_eth_soc.h
+@@ -89,6 +89,7 @@
+ #define MTK_GDMA_TCS_EN		BIT(21)
+ #define MTK_GDMA_UCS_EN		BIT(20)
+ #define MTK_GDMA_DROP_ALL       0x7777
++#define MTK_GDMA_PDMA_ALL       0x0
+ 
+ /* Unicast Filter MAC Address Register - Low */
+ #define MTK_GDMA_MAC_ADRL(x)	(0x508 + (x * 0x1000))
+@@ -306,6 +307,10 @@
+ #define RX_DMA_FPORT_SHIFT	19
+ #define RX_DMA_FPORT_MASK	0x7
+ 
++/* PHY Polling and SMI Master Control */
++#define MTK_PHY_PSC		0x10000
++#define PHY_AP_EN		BIT(31)
++
+ /* PHY Indirect Access Control registers */
+ #define MTK_PHY_IAC		0x10004
+ #define PHY_IAC_ACCESS		BIT(31)
+@@ -412,6 +417,7 @@
+ #define ETHSYS_RSTCTRL		0x34
+ #define RSTCTRL_FE		BIT(6)
+ #define RSTCTRL_PPE		BIT(31)
++#define RSTCTRL_ETH		BIT(23)
+ 
+ /* SGMII subsystem config registers */
+ /* Register to auto-negotiation restart */

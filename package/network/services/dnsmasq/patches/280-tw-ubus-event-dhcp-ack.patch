@@ -1,0 +1,42 @@
+Index: dnsmasq-2.84/src/rfc2131.c
+===================================================================
+--- dnsmasq-2.84.orig/src/rfc2131.c
++++ dnsmasq-2.84/src/rfc2131.c
+@@ -1492,7 +1492,7 @@ size_t dhcp_reply(struct dhcp_context *c
+ 	    override = lease->override;
+ 
+ 	  daemon->metrics[METRIC_DHCPACK]++;
+-	  log_packet("DHCPACK", &mess->yiaddr, emac, emac_len, iface_name, hostname, NULL, mess->xid);  
++	  log_packet("DHCPACK", &mess->yiaddr, emac, emac_len, iface_name, hostname, "forDhcpRequest", mess->xid);  
+ 
+ 	  clear_packet(mess, end);
+ 	  option_put(mess, end, OPTION_MESSAGE_TYPE, 1, DHCPACK);
+@@ -1676,7 +1676,7 @@ static void log_packet(char *type, void
+ {
+   struct in_addr a;
+  
+-  if (!err && !option_bool(OPT_LOG_OPTS) && option_bool(OPT_QUIET_DHCP))
++  if ((!err || !strcmp(err, "forDhcpRequest")) && !option_bool(OPT_LOG_OPTS) && option_bool(OPT_QUIET_DHCP))
+     return;
+   
+   /* addr may be misaligned */
+@@ -1707,9 +1707,19 @@ static void log_packet(char *type, void
+ 
+ #ifdef HAVE_UBUS
+ 	if (!strcmp(type, "DHCPACK"))
++	{
+ 		ubus_event_bcast("dhcp.ack", daemon->namebuff, addr ? inet_ntoa(a) : NULL, string ? string : NULL, interface);
++		if (addr && daemon->namebuff && err && !strcmp(err, "forDhcpRequest"))
++		{
++			char buf[1024] = {0};
++			snprintf(buf, sizeof(buf), "ubus send dnsmasq_dhcp_ack '{\"ip\":\"%s\", \"name\":\"%s\", \"mac\":\"%s\"}'", inet_ntoa(a), string ? string : " ", daemon->namebuff);
++			system(buf);
++		}
++	}
+ 	else if (!strcmp(type, "DHCPRELEASE"))
++	{
+ 		ubus_event_bcast("dhcp.release", daemon->namebuff, addr ? inet_ntoa(a) : NULL, string ? string : NULL, interface);
++	}
+ #endif
+ }
+ 

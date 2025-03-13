@@ -1,0 +1,26 @@
+--- a/drivers/net/ethernet/mediatek/mtk_hnat/hnat_debugfs.c
++++ b/drivers/net/ethernet/mediatek/mtk_hnat/hnat_debugfs.c
+@@ -1636,6 +1636,11 @@ static ssize_t hnat_mape_toggle_write(st
+ 	char buf;
+ 	int len = count;
+ 
++	if (len >= sizeof(buf))
++	{
++		return -EFAULT;
++	}
++
+ 	if (copy_from_user(&buf, buffer, len))
+ 		return -EFAULT;
+ 
+@@ -1676,6 +1681,11 @@ static ssize_t hnat_hook_toggle_write(st
+ 	char buf[64] = {0};
+ 	int len = count;
+ 
++	if (len >= sizeof(buf))
++	{
++		return -EFAULT;
++	}
++
+ 	if (copy_from_user(buf, buffer, len))
+ 		return -EFAULT;
+ 

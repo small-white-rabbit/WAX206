@@ -1,0 +1,300 @@
+#!/bin/sh /etc/rc.common
+
+START=90
+
+CONFIG=/sbin/uci
+PROG=/usr/sbin/openvpn
+mtdn=`grep Cert /proc/mtd | awk -F ':' '{print $1}' | awk -F 'd' '{print $2}'`
+partion=/dev/mtd$mtdn
+OPENVPN_CONF_DIR=/tmp/openvpn/
+EASY_RSA_DIR=/tmp/etc/easy-rsa
+
+generate_server_conf_file() {
+	if [ "$1" = "tap" ]; then
+	port=$($CONFIG get openvpn.sample_server.taport)
+	proto=$($CONFIG get openvpn.sample_server.taproto)
+	if [ "$proto" = "udp" ]; then
+		sndbuf=393216
+		rcvbuf=393216
+	else
+		sndbuf=0
+		rcvbuf=0
+	fi
+	cat <<EOF
+dh /tmp/openvpn/dh2048.pem
+ca /tmp/openvpn/ca.crt
+cert /tmp/openvpn/server.crt
+key /tmp/openvpn/server.key
+dev tap0
+server-bridge
+proto $proto 
+port $port 
+keepalive 10 120
+verb 5
+mute 5
+log-append /tmp/openvpn_log
+writepid /tmp/openvpnd.pid
+status /tmp/openvpnd.status 5
+topology subnet
+script-security 2
+cipher AES-128-CBC
+tls-server
+client-to-client
+duplicate-cn
+comp-lzo
+fast-io
+user root
+client-connect "/tmp/openvpn/push_routing_rule tap"
+EOF
+	else 
+	port=$($CONFIG get openvpn.sample_server.tunport)
+	proto=$($CONFIG get openvpn.sample_server.tunproto)
+	lan_netmask=$($CONFIG get network.lan.netmask)
+	lan_ipaddr=$($CONFIG get network.lan.ipaddr)
+	subnet=$(net_id.sh $lan_ipaddr $lan_netmask subnet)
+	wanifname=$($CONFIG get network.wan_dev.name)
+	wannetwork=$(ip addr show $wanifname|grep "inet\b"|awk '{print $2}')
+	waninfo=$(ipcalc.sh ${wannetwork%%/*} ${wannetwork#*/})
+	eval $waninfo
+	if [ "$NETWORK" = "$subnet" ]; then
+		subnet=$(net_id.sh $IP $NETMASK subnet)
+	fi
+	if [ "$proto" = "udp" ]; then
+		sndbuf=393216
+		rcvbuf=393216
+	else
+		sndbuf=0
+		rcvbuf=0
+	fi
+	cat <<EOF
+dh /tmp/openvpn/dh2048.pem
+ca /tmp/openvpn/ca.crt
+cert /tmp/openvpn/server.crt
+key /tmp/openvpn/server.key
+server $subnet 255.255.255.0
+dev tun0
+proto $proto 
+port $port 
+keepalive 10 120
+verb 5
+mute 5
+log-append /tmp/openvpn_tun_log
+writepid /tmp/openvpnd_tun.pid
+status /tmp/openvpnd_tun.status 5
+topology subnet
+script-security 2
+cipher AES-128-CBC
+client-to-client
+duplicate-cn
+comp-lzo
+fast-io
+push "dhcp-option DNS $lan_ipaddr"
+user root
+client-connect "/tmp/openvpn/push_routing_rule tun"
+EOF
+	fi
+}
+
+set_up_ethernet_bridge() {
+	br="br-lan"
+	tap="tap0"
+	lan_ipaddr=$($CONFIG get network.lan.ipaddr)
+	lan_netmask=$($CONFIG get network.lan.netmask)
+	$PROG --mktun --dev $tap
+	brctl addif $br $tap
+	ifconfig $tap 0.0.0.0 promisc up
+#	ifconfig $br $lan_ipaddr netmask $lan_netmask 
+	
+}
+
+extract_cert_file() {
+	mkdir -p $OPENVPN_CONF_DIR
+
+	nanddump -q $partion -f /tmp/openvpn_keys.tar.gz
+	tar -xzvf /tmp/openvpn_keys.tar.gz -C $OPENVPN_CONF_DIR
+	TAR_STATUS=$?
+	if [ -s $OPENVPN_CONF_DIR/cert.info  -a -s $OPENVPN_CONF_DIR/ca.crt  -a -s $OPENVPN_CONF_DIR/client.crt -a -s $OPENVPN_CONF_DIR/client.key -a -s $OPENVPN_CONF_DIR/server.crt -a -s $OPENVPN_CONF_DIR/server.key ]; then
+		FILES_EXIST=1
+	fi
+	if [ "$TAR_STATUS" = "0" -a "$FILES_EXIST" = "1" ]; then
+		RET_STATUS=0
+	else
+		RET_STATUS=1
+		regenerate_cert_file
+		#rm -f $OPENVPN_CONF_DIR/*
+	fi
+	rm -f /tmp/openvpn_keys.tar.gz
+	echo $RET_STATUS > $OPENVPN_CONF_DIR/cert_file_status
+	#cp /etc/openvpn/push_routing_rule $OPENVPN_CONF_DIR
+	#cat /etc/openvpn/server.enc.bin | enigma -m DEC > /tmp/server.key
+	#chmod 0600 $OPENVPN_CONF_DIR/server.key
+	#cat /etc/openvpn/client.enc.bin | enigma -m DEC > /tmp/client.key
+	#chmod 0600 $OPENVPN_CONF_DIR/client.key
+	cat /etc/openvpn/ta.enc.bin | enigma -m DEC > $OPENVPN_CONF_DIR/ta.key
+	chmod 0600 $OPENVPN_CONF_DIR/ta.key
+	cat /etc/openvpn/dh2048.enc.bin | enigma -m DEC > $OPENVPN_CONF_DIR/dh2048.pem
+	chmod 0600 $OPENVPN_CONF_DIR/dh2048.pem
+	return $RET_STATUS
+}
+
+write_back_to_partion(){
+	cd $EASY_RSA_DIR/keys
+	CERT_FILE="cert.info ca.crt client.crt client.key server.crt server.key" 
+	tar -czvf openvpn_keys.tar.gz $CERT_FILE
+	#dd if=/dev/zero bs=1024k count=1 | tr "\000" "\377" >1024kdata
+	#dd if=openvpn_keys.tar.gz of=1024kdata conv=notrunc
+	#flash_erase $partion 0 0
+	#cat 1024kdata > $partion
+	flash_erase $partion 0 0
+	nandwrite -p -m -q $partion openvpn_keys.tar.gz
+	cp $CERT_FILE $OPENVPN_CONF_DIR
+	cd /tmp/
+	rm -rf $EASY_RSA_DIR/keys
+}
+
+regenerate_cert_file() {
+	local date_yy=$(date |awk -F ' ' '{printf $NF}')
+	if [ $date_yy -eq 1970 ]; then
+		/bin/openvpn_update
+		return
+	fi
+	mkdir -p $EASY_RSA_DIR
+	cp /etc/easy-rsa/vars $EASY_RSA_DIR
+	cp /etc/easy-rsa/openssl*.cnf $EASY_RSA_DIR
+	#Save the generate cert pid to void double calling
+	[ ! -d /var/run/ ] && mkdir -p /var/run/
+	echo $$ > /var/run/openvpn_generate_cert.pid
+
+	clean-all
+	build-ca
+	build-key-server server
+	build-key client
+	sn=$(uci get system.@system[0].sn | sed 's/sn://g')
+	echo $sn > $EASY_RSA_DIR/keys/cert.info
+	write_back_to_partion
+
+	echo -n > /var/run/openvpn_generate_cert.pid
+}
+
+boot() {
+	exit 0
+	extract_cert_file || {
+		echo "extract vpn cert file fail, can not start vpn server" >/dev/console
+		exit 0
+	}	
+	start
+}
+
+start() {
+	if [ "$($CONFIG get openvpn.sample_server.enabled)" != "1" ]; then
+		exit 0
+	else
+		#always shut down openvpn server
+		$CONFIG set openvpn.sample_server.enabled=0
+		$CONFIG commit openvpn
+		exit 0
+	fi
+
+	netmode="$($CONFIG get system.@system[0].netmode)"
+	netmode="${netmode:-"router"}"
+	if [ $netmode != "router" ]; then
+		exit 0
+	fi
+
+	if [ "$($CONFIG get ddns.common.enable)" != "1" ] && [ "$($CONFIG get network.wan.ipassign)" != "1" ]; then
+		exit 0
+	fi
+	FILES_EXIST=0
+	if [ -s $OPENVPN_CONF_DIR/cert.info  -a -s $OPENVPN_CONF_DIR/ca.crt  -a -s $OPENVPN_CONF_DIR/client.crt -a -s $OPENVPN_CONF_DIR/client.key -a -s $OPENVPN_CONF_DIR/server.crt -a -s $OPENVPN_CONF_DIR/server.key ]; then
+		FILES_EXIST=1
+	fi
+	if [ "x$FILES_EXIST" = "x0" ]; then
+		extract_cert_file
+	fi
+	#mkdir -p $OPENVPN_CONF_DIR
+	cp /usr/sbin/push_routing_rule $OPENVPN_CONF_DIR
+	OPENVPN_TAP_CONF_FILE=/tmp/openvpn/server_tap.conf
+	OPENVPN_TUN_CONF_FILE=/tmp/openvpn/server_tun.conf
+	
+	OPENVPN_TAP_ROUTE_CONF_FILE=/tmp/openvpn/server_route_tap.conf
+	OPENVPN_TUN_ROUTE_CONF_FILE=/tmp/openvpn/server_route_tun.conf
+	
+	generate_server_conf_file tap > $OPENVPN_TAP_CONF_FILE
+	generate_server_conf_file tun > $OPENVPN_TUN_CONF_FILE
+
+#	/bin/wget -T 10 http://www.speedtest.net/api/country -O /tmp/openvpn/server_location
+	
+#	/usr/sbin/push_routing_rule tap  $OPENVPN_TAP_ROUTE_CONF_FILE
+#	/usr/sbin/push_routing_rule tun  $OPENVPN_TUN_ROUTE_CONF_FILE
+	
+#	cat $OPENVPN_TAP_ROUTE_CONF_FILE >> $OPENVPN_TAP_CONF_FILE
+#	cat $OPENVPN_TUN_ROUTE_CONF_FILE >> $OPENVPN_TUN_CONF_FILE
+	set_up_ethernet_bridge
+
+	# open the door to let client in 
+#	$CONFIG set vpn_tun_ip_for_gui=${subnet}
+#	$CONFIG set vpn_tun_server_ip=${subnet}
+#	net-wall rule
+#	net-wall start
+#	/etc/init.d/firewall restart
+
+	$PROG $OPENVPN_TAP_CONF_FILE &
+	$PROG $OPENVPN_TUN_CONF_FILE &
+
+#	openvpn_client.sh "enable"
+}
+
+stop() {
+	br="br-lan"
+	tap="tap0"
+
+	tappid=$(cat /tmp/openvpnd.pid 2> /dev/null)
+	if [ "x$tappid" != "x" ]; then
+		kill $tappid
+		rm -f /tmp/openvpnd.pid 2> /dev/null
+		rm -f /tmp/openvpn_log 2> /dev/null
+		rm -f /tmp/openvpntap.test 2> /dev/null
+		brctl delif $br $tap
+		$PROG --rmtun --dev $tap
+	fi
+
+	tunpid=$(cat /tmp/openvpnd_tun.pid 2> /dev/null)
+	if [ "x$tunpid" != "x" ]; then
+		kill $tunpid
+		rm -f /tmp/openvpnd_tun.pid 2> /dev/null
+		rm -f /tmp/openvpn_tun_log 2> /dev/null
+		rm -f /tmp/openvpntun.test 2> /dev/null
+	fi
+	#close the door
+#	net-wall rule
+#	net-wall start
+#	/etc/init.d/firewall restart
+#    openvpn_client.sh "disable"
+}
+
+restart() {
+	stop
+	start
+}
+
+#case "$1" in
+#       "boot")
+#               boot
+#       ;;
+#       "start")
+#               start
+#       ;;
+#       "stop")
+#               stop
+#       ;;
+#       "restart")
+#               restart
+#       ;;
+#       "regenerate_cert_file")
+#               regenerate_cert_file
+#       ;;
+#       *)
+#               echo "Unknow command" > /dev/console
+#               echo "Usage: $0 boot|start|stop|restart|regenerate_cert_file" > /dev/console
+#       ;;
+#esac

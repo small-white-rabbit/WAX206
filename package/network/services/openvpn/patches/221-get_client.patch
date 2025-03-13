@@ -1,0 +1,22 @@
+diff --git a/src/openvpn/socket.c b/src/openvpn/socket.c
+index 7d3dd60..02e42a7 100644
+--- a/src/openvpn/socket.c
++++ b/src/openvpn/socket.c
+@@ -2309,7 +2309,7 @@ link_socket_connection_initiated(const struct buffer *buf,
+                                  struct env_set *es)
+ {
+     struct gc_arena gc = gc_new();
+-
++    char   tmp_buf[128] = {0};
+     info->lsa->actual = *act; /* Note: skip this line for --force-dest */
+     setenv_trusted(es, info);
+     info->connection_established = true;
+@@ -2322,6 +2322,8 @@ link_socket_connection_initiated(const struct buffer *buf,
+             buf_printf(&out, "[%s] ", common_name);
+         }
+         buf_printf(&out, "Peer Connection Initiated with %s", print_link_socket_actual(&info->lsa->actual, &gc));
++        sprintf(tmp_buf, "echo %s | awk -F ']' '{print $2}' |awk -F ':' '{print $1}'> /tmp/openvpn/client_ip", print_link_socket_actual(&info->lsa->actual, &gc));
++        system(tmp_buf);
+         msg(M_INFO, "%s", BSTR(&out));
+     }
+ 

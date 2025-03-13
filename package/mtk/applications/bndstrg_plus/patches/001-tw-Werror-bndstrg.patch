@@ -1,0 +1,41 @@
+--- a/bndstrg.c
++++ b/bndstrg.c
+@@ -169,6 +169,27 @@ struct bndstrg_iface * bndstrg_get_inter
+ struct bndstrg_iface * bndstrg_get_interface_by_channel(
+     struct bndstrg_ctrl_iface *ctrl_iface,  
+     u8 channel);
++/* T&W modify for Werror 20210219 */
++#if 1 
++int bndstrg_accessible_cli(struct bndstrg *bndstrg, struct bndstrg_iface *inf, struct bndstrg_cli_entry *entry, u8 action);
++int bndstrg_send_white_black_list(struct bndstrg *bndstrg, const char *iface, unsigned char *macaddr, u8 list_type, u8 deladd);
++int bndstrg_accessible_cli(struct bndstrg *bndstrg,struct bndstrg_iface *inf,struct bndstrg_cli_entry *entry,u8 action);
++int bndstrg_inf_status_query(
++				struct bndstrg *bndstrg,
++				const char *iface, u8 action);
++int bndstrg_chanload_status_query(
++	struct bndstrg *bndstrg,
++	const char *iface);
++int bndstrg_onoff(
++				struct bndstrg *bndstrg,
++				const char *iface,
++				u8 onoff,
++				u8 mode);
++int bndstrg_wnm_send_btm_req(struct bndstrg *bndstrg, 
++	struct bndstrg_iface *inf, 
++	struct bndstrg_iface *destination_inf, 
++	struct bndstrg_cli_entry *entry);
++#endif
+ 
+ char* getFormattedTime(void) {
+ 
+@@ -5075,8 +5096,9 @@ u8 bndstrg_inf_status_polling(struct bnd
+ 	}	
+ 		
+     if(inf_ready_count != ctrl_iface->Size)
++	{
+         return FALSE;
+-
++	}
+ 	if ((band_cnt[0]>=2) ||(band_cnt[1]>=2)||(band_cnt[2]>=2)){
+ 		if (polling_cnt > 3) {
+ 			DBGPRINT(DEBUG_OFF, RED("[%d]:Invalid Band topology. 2.4G=%d,L-5G=%d,H-5G=%d\n"),__LINE__,band_cnt[0],band_cnt[1],band_cnt[2]);

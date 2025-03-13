@@ -1,0 +1,1207 @@
+--- a/include/uapi/linux/netlink.h
++++ b/include/uapi/linux/netlink.h
+@@ -27,7 +27,7 @@
+ #define NETLINK_ECRYPTFS	19
+ #define NETLINK_RDMA		20
+ #define NETLINK_CRYPTO		21	/* Crypto layer */
+-
++#define NETLINK_DHCP_TBL    22  /* T&W add 20201216 */
+ #define NETLINK_INET_DIAG	NETLINK_SOCK_DIAG
+ 
+ #define MAX_LINKS 32		
+--- a/net/bridge/br.c
++++ b/net/bridge/br.c
+@@ -22,6 +22,345 @@
+ #include <net/switchdev.h>
+ 
+ #include "br_private.h"
++#define CONFIG_TW_DNS_HIJACK
++#ifdef CONFIG_TW_DNS_HIJACK
++#include <linux/proc_fs.h>
++#include <net/addrconf.h>
++#include <linux/notifier.h>
++#include <linux/inetdevice.h>
++#include <linux/netlink.h>
++
++/* 0 :disable 1:filter netgear url 2: filter all url */
++int netgear_dns_hijack = 1;
++unsigned int netgear_dns_hijackip = 0;
++struct in6_addr netgear_dns_hijackip6;
++
++int g_dhcpmon_pid = 0;
++struct sock *netlink_dhcpmon_sock = NULL;
++
++static int dnshijack_inetaddr_event(struct notifier_block *this, unsigned long event, void *ptr)
++{
++    struct in_ifaddr *ifa = (struct in_ifaddr *) ptr;
++    struct net_device *dev = ifa->ifa_dev->dev;
++
++    if (dev && !strcmp(dev->name, "br-lan"))
++    {
++        if (event == NETDEV_UP && (0 == strcmp(dev->name, ifa->ifa_label)))
++        {
++            netgear_dns_hijackip = ifa->ifa_address;
++        }
++        else if (event == NETDEV_DOWN)
++        {
++            ; // ignore
++        }
++    }
++
++    return NOTIFY_OK;
++}
++
++static struct notifier_block dnshijack_ip_notifier = {
++    .notifier_call = dnshijack_inetaddr_event,
++};
++
++static int dnshijack_inet6addr_event(struct notifier_block *this, unsigned long event, void *ptr)
++{
++    struct inet6_ifaddr *ifa = (struct inet6_ifaddr *)ptr;
++    struct net_device *dev = ifa->idev->dev;
++
++    if (dev && !strcmp(dev->name, "br-lan"))
++    {
++        if (event == NETDEV_UP)
++        {
++            if (ifa->scope == 0x20)
++            {
++                netgear_dns_hijackip6 = ifa->addr;
++            }
++        }
++        else if (event == NETDEV_DOWN)
++        {
++            ; // ignore
++        }
++    }
++
++    return NOTIFY_OK;
++}
++
++
++static struct notifier_block dnshijack_inet6addr_notifier = {
++    .notifier_call = dnshijack_inet6addr_event,
++};
++
++static int br_netgear_dnshijack_write(struct file *file, const char __user *buf,size_t count, loff_t *data)
++{
++    char buffer[64] = {0};
++    int len = 0;
++    int dnshij= 0;
++
++    if (*data)
++    {
++        return -EINVAL;
++    }
++
++    len = (count < (sizeof(buffer) - 1)) ? count : (sizeof(buffer) - 1);
++    if (copy_from_user(buffer, buf, len))
++    {
++        return -EINVAL;
++    }
++
++    buffer[len] = '\0';
++    if(sscanf(buffer, "%d", &dnshij) != 1)
++    {
++        return -EINVAL;
++    }
++    if (dnshij >= 0 && dnshij < 3)
++    {
++        netgear_dns_hijack = dnshij;
++    }
++    return count;
++}
++
++static int br_netgear_dnshijack_read(struct file *file, char __user *buf,size_t count, loff_t *data)
++{
++    int len = 0;
++    char buffer[64] = {0};
++    long err = 0;
++
++    if(0 != *data)
++    {
++        return 0;
++    }
++
++    memset(buffer, 0 ,sizeof(buffer));
++    len = sprintf(buffer, "%d\n", netgear_dns_hijack);
++    err = copy_to_user(buf, buffer, len);
++
++    if (err)
++    {
++        return err;
++    }
++
++    *data += len;
++    return len;
++}
++
++static int br_netgear_dnshijackip_write(struct file *file, const char __user *buf,size_t count, loff_t *data)
++{
++    char buffer[128] = {0};
++    int len = 0;
++    unsigned int ucBrIP[4] = {0};
++
++    if (*data)
++    {
++        return -EINVAL;
++    }
++
++    len = (count < (sizeof(buffer) - 1)) ? count : (sizeof(buffer) - 1);
++
++    if (copy_from_user(buffer, buf, len))
++    {
++        return -EINVAL;
++    }
++
++    buffer[len] = '\0';
++
++    if(sscanf(buffer,"%d.%d.%d.%d", &ucBrIP[3], &ucBrIP[2], &ucBrIP[1], &ucBrIP[0]) != 4)
++    {
++        return -EINVAL;
++    }
++
++    netgear_dns_hijackip = ((ucBrIP[0]&0xff) << 24) | ((ucBrIP[1]&0xff) << 16) | ((ucBrIP[2]&0xff) << 8) | (ucBrIP[3]&0xff);
++    return len;
++}
++static int br_netgear_dnshijackip_read(struct file *file, char __user *buf,size_t count, loff_t *data)
++{
++    int len = 0;
++    char buffer[64] = {0};
++    long err = 0;;
++
++    if (0 != *data)
++    {
++        return 0;
++    }
++
++    memset(buffer, 0 ,sizeof(buffer));
++    len = sprintf(buffer, "%pI4 %pi6 \n", &netgear_dns_hijackip, &netgear_dns_hijackip6);
++    err = copy_to_user(buf, buffer, len);
++    if (err)
++    {
++        return err;
++    }
++    *data += len;
++    return len;
++}
++
++char *strDownCase(char *dst)
++{
++    while (1) {
++        unsigned char ch = *dst;
++        if (ch >= 'A' && ch <= 'Z')
++            *dst = *dst + ('a' - 'A');
++        if (ch == '\0')
++            break;
++        dst++;
++    }
++    return dst;
++}
++
++char sgNetgearDns[NETGEAT_MAX_DNS_NUM][NETGEAT_MAX_DNS_LEN];
++int sgDnsCnt=0;
++
++static int br_netgear_dnshijackdomain_write(struct file *file, const char __user *buf,size_t count, loff_t *data)
++{
++    static char buffer[NETGEAT_MAX_DNS_NUM * NETGEAT_MAX_DNS_LEN] = {0};
++    int len = 0;
++    char domain_line[NETGEAT_MAX_DNS_LEN] = {0};
++    char *domain = NULL;
++    char *domain_list = NULL;
++
++    if (*data)
++    {
++        return -EINVAL;
++    }
++
++    len = (count < (sizeof(buffer) - 1)) ? count : (sizeof(buffer) - 1);
++
++    if (copy_from_user(buffer, buf, len))
++    {
++        return -EINVAL;
++    }
++
++    buffer[len] = '\0';
++    domain_list = &buffer;
++
++    sgDnsCnt = 0;
++    memset(&sgNetgearDns, 0, sizeof(sgNetgearDns));
++
++    while (domain = strsep(&domain_list, "\n"))
++    {
++        memset(domain_line, 0, sizeof(domain_line));
++        if(domain[0] == '\0')
++            break;
++        strncpy(domain_line, domain, NETGEAT_MAX_DNS_LEN - 1);
++        sscanf(domain_line, "%s", sgNetgearDns[sgDnsCnt]);
++        strDownCase(sgNetgearDns[sgDnsCnt]);
++        sgDnsCnt++;
++    }
++
++    return len;
++}
++
++static int br_netgear_dnshijackdomain_read(struct file *file, char __user *buf,size_t count, loff_t *data)
++{
++    int len = 0;
++    static char buffer[NETGEAT_MAX_DNS_NUM * NETGEAT_MAX_DNS_LEN] = {0};
++    long err = 0;
++    int i = 0;
++
++    if (0 != *data)
++    {
++        return 0;
++    }
++
++    for (i = 0; i < sgDnsCnt; i++)
++    {
++        if (len < (sizeof(buffer) - 1))
++        {
++            len += snprintf(&buffer[len], sizeof(buffer) - 1 - len, "%s\n", sgNetgearDns[i]);
++        }
++        else
++        {
++            break;
++        }
++    }
++
++    if (len > 0)
++    {
++        err = copy_to_user(buf, buffer, len);
++        if (err)
++        {
++            return err;
++        }
++
++        *data += len;
++    }
++
++    return len;
++}
++
++static const struct file_operations br_dns_hijack_entry = {
++    .owner         = THIS_MODULE,
++    .read           = br_netgear_dnshijack_read,
++    .write          = br_netgear_dnshijack_write,
++
++};
++
++static const struct file_operations br_dns_hijackip_entry = {
++    .owner         = THIS_MODULE,
++    .read           = br_netgear_dnshijackip_read,
++    .write          = br_netgear_dnshijackip_write,
++};
++
++static const struct file_operations br_dns_hijackdomain_entry = {
++    .owner         = THIS_MODULE,
++    .read           = br_netgear_dnshijackdomain_read,
++    .write          = br_netgear_dnshijackdomain_write,
++};
++
++static int dhcpmon_pid_write_proc(struct file *file, const char __user *buf,size_t count, loff_t *data)
++{
++    char buffer[64] = {0};
++    int len = 0;
++    int tmpPid = 0;
++
++    if (*data)
++    {
++        return -EINVAL;
++    }
++
++    len = (count < (sizeof(buffer) - 1)) ? count : (sizeof(buffer) - 1);
++    if (copy_from_user(buffer, buf, len))
++    {
++        return -EINVAL;
++    }
++
++    buffer[len] = '\0';
++    if(sscanf(buffer, "%d", &tmpPid) != 1)
++    {
++        return -EINVAL;
++    }
++    g_dhcpmon_pid = tmpPid;
++    return count;
++}
++
++static int dhcpmon_pid_read_proc(struct file *file, const char __user *buf,size_t count, loff_t *data)
++{
++    int len = 0;
++    char buffer[64] = {0};
++    long err = 0;;
++
++    if (0 != *data)
++    {
++        return 0;
++    }
++
++    memset(buffer, 0 ,sizeof(buffer));
++    len = sprintf(buffer, "%d", g_dhcpmon_pid);
++
++    err = copy_to_user(buf, buffer, len);
++    if (err)
++    {
++        return err;
++    }
++    *data += len;
++    return len;
++}
++
++static const struct file_operations dhcpmon_fops = {
++    .owner          = THIS_MODULE,
++    .read           = dhcpmon_pid_read_proc,
++    .write          = dhcpmon_pid_write_proc,
++};
++#endif
+ 
+ /*
+  * Handle changes in state of network devices enslaved to a bridge.
+@@ -230,7 +569,16 @@ static int __init br_init(void)
+ 	pr_info("bridge: automatic filtering via arp/ip/ip6tables has been "
+ 		"deprecated. Update your scripts to load br_netfilter if you "
+ 		"need this.\n");
+-
++#ifdef CONFIG_TW_DNS_HIJACK
++	proc_create( "dhcpmon_pid", 0x0644, NULL, &dhcpmon_fops);
++    netlink_dhcpmon_sock = netlink_kernel_create(&init_net, NETLINK_DHCP_TBL, NULL);
++    /*Register transfer proc interface*/
++    proc_create( "br_dns_hijackip", 0x0644, NULL, &br_dns_hijackip_entry);
++    proc_create( "br_dns_hijack", 0x0644, NULL, &br_dns_hijack_entry);
++    proc_create( "br_dns_hijackdomain", 0x0644, NULL, &br_dns_hijackdomain_entry);
++    register_inetaddr_notifier(&dnshijack_ip_notifier);
++    register_inet6addr_notifier(&dnshijack_inet6addr_notifier);
++#endif
+ 	return 0;
+ 
+ err_out5:
+@@ -254,6 +602,14 @@ static void __exit br_deinit(void)
+ 	br_netlink_fini();
+ 	unregister_switchdev_notifier(&br_switchdev_notifier);
+ 	unregister_netdevice_notifier(&br_device_notifier);
++#ifdef CONFIG_TW_DNS_HIJACK
++    if (netlink_dhcpmon_sock != NULL)
++    {
++        sock_release(netlink_dhcpmon_sock->sk_socket);
++    }
++	unregister_inetaddr_notifier(&dnshijack_ip_notifier);
++	unregister_inet6addr_notifier(&dnshijack_inet6addr_notifier);
++#endif
+ 	brioctl_set(NULL);
+ 	unregister_pernet_subsys(&br_net_ops);
+ 
+--- a/net/bridge/br_input.c
++++ b/net/bridge/br_input.c
+@@ -21,10 +21,733 @@
+ #include <linux/export.h>
+ #include <linux/rculist.h>
+ #include "br_private.h"
++#include "dhcpd.h"
+ 
+ /* Hook for brouter */
+ br_should_route_hook_t __rcu *br_should_route_hook __read_mostly;
+ EXPORT_SYMBOL(br_should_route_hook);
++#define CONFIG_TW_DNS_HIJACK
++#ifdef CONFIG_TW_DNS_HIJACK
++#include <net/ip.h>
++#include <linux/ipv6.h>
++#include <net/ip6_checksum.h>
++#include <linux/udp.h>
++#define DNS_TTL  (0)
++#define NETLINK_DHCP_TBL    22
++
++struct udp_dhcp_packet
++{
++	struct iphdr ip;
++	struct udphdr udp;
++	struct dhcpMessage data;
++};
++
++typedef struct device_list_table
++{
++	unsigned char ip[4];
++	unsigned char mac[6];
++	unsigned char ifname[16];
++	unsigned char hostname[64];
++    int ifindex;
++	int pkttype;
++}device_list_table;
++
++extern int g_dhcpmon_pid;
++extern struct sock *netlink_dhcpmon_sock;
++rwlock_t  br_netlink_lock;
++
++unsigned char *br_get_dhcp_option(struct dhcpMessage *packet, int code, unsigned char *option_len)
++{
++    int i, length;
++    unsigned char *optionptr = NULL;
++    int over = 0, done = 0, curr = OPTION_FIELD;
++
++    optionptr = packet->options;
++    i = 0;
++    length = 308;
++    while (!done)
++    {
++        if (i >= length)
++        {
++            return NULL;
++        }
++
++        if (optionptr[i + OPT_CODE] == code)
++        {
++            if (i + 1 + optionptr[i + OPT_LEN] >= length)
++            {
++                return NULL;
++            }
++            *option_len = optionptr[i + OPT_LEN];
++            return optionptr + i + 2;
++        }
++        switch (optionptr[i + OPT_CODE])
++        {
++            case DHCP_PADDING:
++                i++;
++                break;
++            case DHCP_OPTION_OVER:
++                if (i + 1 + optionptr[i + OPT_LEN] >= length)
++                {
++                    return NULL;
++                }
++                over = optionptr[i + 3];
++                i += optionptr[OPT_LEN] + 2;
++                break;
++            case DHCP_END:
++                if (curr == OPTION_FIELD && over & FILE_FIELD)
++                {
++                    optionptr = packet->file;
++                    i = 0;
++                    length = 128;
++                    curr = FILE_FIELD;
++                }
++                else if (curr == FILE_FIELD && over & SNAME_FIELD)
++                {
++                    optionptr = packet->sname;
++                    i = 0;
++                    length = 64;
++                    curr = SNAME_FIELD;
++                }
++                else
++                {
++                    done = 1;
++                }
++                break;
++            default:
++                i += optionptr[OPT_LEN + i] + 2;
++        }
++    }
++    return NULL;
++}
++
++static void send_msg_to_user(struct device_list_table device_msg)
++{
++    int size = 0, ret = 0;
++    struct device_list_table *s_device = NULL;
++    struct sk_buff *skb = NULL;
++    struct nlmsghdr *nlh = NULL;
++
++    if(g_dhcpmon_pid == 0)
++    {
++        printk("dhcpmon_pid's pid = %d.Please run dhcpmon_pid.\n", g_dhcpmon_pid);
++        return;
++    }
++
++    size = NLMSG_SPACE(sizeof(struct device_list_table));
++
++    skb = alloc_skb(size, GFP_ATOMIC);
++
++    nlh = nlmsg_put(skb, 0, 0, NETLINK_DHCP_TBL, size-sizeof(*nlh), 0);
++
++    s_device = NLMSG_DATA(nlh);
++
++    memset(s_device, 0, size);
++    s_device->ip[0] = device_msg.ip[0];
++    s_device->ip[1] = device_msg.ip[1];
++    s_device->ip[2] = device_msg.ip[2];
++    s_device->ip[3] = device_msg.ip[3];
++
++    s_device->mac[0] = device_msg.mac[0];
++    s_device->mac[1] = device_msg.mac[1];
++    s_device->mac[2] = device_msg.mac[2];
++    s_device->mac[3] = device_msg.mac[3];
++    s_device->mac[4] = device_msg.mac[4];
++    s_device->mac[5] = device_msg.mac[5];
++    s_device->ifindex = device_msg.ifindex;
++    s_device->pkttype = device_msg.pkttype;
++    memcpy(s_device->hostname, device_msg.hostname, 64);
++    memcpy(s_device->ifname, device_msg.ifname, sizeof(device_msg.ifname));
++
++    nlh->nlmsg_len = size;
++    /* send msg */
++    ret = netlink_unicast(netlink_dhcpmon_sock, skb, g_dhcpmon_pid, MSG_DONTWAIT);
++    return;
++}
++
++
++/*************************************
++ * fuction: br_dhcp_packet
++ * input: udp data, dhcp option code
++ * return:code offset at skb
++ *************************************/
++int br_dhcp_packet(struct sk_buff *skb, unsigned char *br_dest, const unsigned char *dest)
++{
++    struct iphdr *iph = NULL;
++    struct udphdr *udph = NULL;
++    struct udp_dhcp_packet *dhcp_packet = NULL;
++    unsigned char option_len = 0, *temp = NULL;
++    struct device_list_table g_deviceListTable;
++
++    if ((NULL == skb) || (NULL == br_dest) || (NULL == dest))
++    {
++        return 0;
++    }
++
++    iph = (struct iphdr *)skb_network_header(skb);
++
++    if(NULL == iph)
++    {
++        return 0;
++    }
++
++    udph=(void *) iph + iph->ihl*4;
++    if(NULL == udph)
++    {
++        return 0;
++    }
++
++    if(iph->protocol == IPPROTO_UDP)
++    {
++        if(ntohs(udph->dest) == 67)
++        {
++            dhcp_packet =(struct udp_dhcp_packet *)skb->data;
++            if(NULL == dhcp_packet)
++            {
++                return 0;
++            }
++
++            if(0x01 == dhcp_packet->data.op)
++            {
++                if (NULL != (temp = br_get_dhcp_option(&(dhcp_packet->data), DHCP_HOST_NAME, &option_len)))
++                {
++                    memset(&g_deviceListTable, 0, sizeof(struct device_list_table));
++                    memcpy(g_deviceListTable.mac, dhcp_packet->data.chaddr, 6);
++                    memcpy(g_deviceListTable.ifname, skb->dev->name, sizeof(skb->dev->name) < sizeof(g_deviceListTable.ifname) ? sizeof(g_deviceListTable.ifname) : sizeof(skb->dev->name) );
++                    if(option_len < 64)
++                    {
++                        memcpy(g_deviceListTable.hostname, temp, option_len);
++                    }
++                    if (NULL != (temp = br_get_dhcp_option(&(dhcp_packet->data), DHCP_REQUESTED_IP, &option_len)))
++                    {
++                        memcpy(g_deviceListTable.ip, temp, 4);
++                    }
++                    g_deviceListTable.ifindex = skb->dev->ifindex;
++                    g_deviceListTable.pkttype = 0;
++                    send_msg_to_user(g_deviceListTable);
++                }
++            }
++        }
++        else if(ntohs(udph->dest) == 68)
++        {
++            dhcp_packet =(struct udp_dhcp_packet *)skb->data;
++            if(NULL == dhcp_packet)
++            {
++                return 0;
++            }
++
++            if(0x02 == dhcp_packet->data.op)
++            {
++                if (NULL != (temp = br_get_dhcp_option(&(dhcp_packet->data), DHCP_PKT_TYPE, &option_len)))
++                {
++                    if (temp[0] == 0x05)
++                    {
++                        memset(&g_deviceListTable, 0, sizeof(struct device_list_table));
++                        memcpy(g_deviceListTable.mac, dhcp_packet->data.chaddr, 6);
++                        g_deviceListTable.pkttype = 5;
++                        g_deviceListTable.ip[0] = (dhcp_packet->data.yiaddr[0]);
++                        g_deviceListTable.ip[1] = (dhcp_packet->data.yiaddr[1]);
++                        g_deviceListTable.ip[2] = (dhcp_packet->data.yiaddr[2]);
++                        g_deviceListTable.ip[3] = (dhcp_packet->data.yiaddr[3]);
++                        send_msg_to_user(g_deviceListTable);
++                    }
++                }
++            }
++        }
++    }
++    return 0;
++}
++
++
++struct dns_header {
++    unsigned short id;
++    unsigned short flags;
++    unsigned short qdcount; //question count
++    unsigned short ancount; //answer counet
++    unsigned short nscount;
++    unsigned short arcount; /* Till here it would fit perfectly to a real DNS packet if we had big endian. */
++}__attribute__((packed));
++
++extern unsigned int netgear_dns_hijackip;
++extern int netgear_dns_hijack;
++extern struct in6_addr netgear_dns_hijackip6;
++
++#if 0
++static int finddomain(char * source, char * dest, int length, int ml)
++{
++    char *s1,*d1;
++    int i = 0;
++
++    if(source == NULL || dest == NULL )
++    {
++        return 0;
++    }
++
++    s1 = source;
++    d1 = dest;
++    while (i + ml <= length)
++    {
++        if (strncasecmp(s1, d1, ml) == 0)
++        {
++            return 1;
++        }
++        s1 = ++source;
++        i++;
++    }
++    return 0;
++}
++
++static int findappledomain(struct udphdr *udph)
++{
++    static char domain1[16] = {0x05,'a','p','p','l','e',0x03,'c','o','m', 0};
++    static char domain2[16] = {0x06,'i','c','l','o','u','d',0x03,'c','o','m', 0};
++    static char domain3[16] = {0x06,'g','o','o','g','l','e',0x03,'c','o','m', 0};
++
++    if(finddomain((unsigned char *)((unsigned char *)udph + 12),domain1,htons(udph->len) - 20, 10))
++        return 1;
++
++    if(finddomain((unsigned char *)((unsigned char *)udph + 12),domain2,htons(udph->len) - 20, 11))
++        return 1;
++
++    if(finddomain((unsigned char *)((unsigned char *)udph + 12),domain3,htons(udph->len) - 20, 11))
++        return 1;
++
++    return 0;
++}
++#endif
++
++
++char *strDownCase(char *dst);
++extern char sgNetgearDns[NETGEAT_MAX_DNS_NUM][NETGEAT_MAX_DNS_LEN];
++extern int sgDnsCnt;
++
++static int br_decode_dns_name(char *domain, char* dnsBuf, int dnsBufLen){
++    int len=0, j=0, strCnt=0, dnsBufCnt=0;
++
++    if((NULL == domain) || (NULL == dnsBuf))
++        return -1;
++
++    //printk("[%s][%d] domain=[%s]\n", __FUNCTION__, __LINE__, domain);
++
++    while( (*domain) && ( strCnt < 20 ))
++    {
++        strCnt++;
++        len = *domain;
++        domain++;
++        if(len & 0xC0)
++        {
++            break;
++            return -1;
++        }
++        else{
++            if((dnsBufCnt + len) > dnsBufLen)
++            {
++                break;
++            }
++            
++            //printk("[%s][%d] domain=[%s]\n", __FUNCTION__, __LINE__, domain);
++
++            for( j = 0; j<len ; j++)
++            {
++                dnsBuf[dnsBufCnt] = *domain;
++                domain++;
++                dnsBufCnt++;
++            }
++            dnsBuf[dnsBufCnt] = '.';
++            dnsBufCnt++;
++        }
++    }
++
++    if(dnsBuf[dnsBufCnt-1] == '.')
++        dnsBuf[dnsBufCnt-1] = 0;  //remove last '.'
++
++    strDownCase(dnsBuf);
++    //printk("[%s][%d] dnsBuf=[%s]\n", __FUNCTION__, __LINE__, dnsBuf);
++    return 1;
++}
++
++
++static int isApple_google_domain(char *domain, int domainlen)
++{
++    //static char domain1[16] = {0x05,'a','p','p','l','e',0x03,'c','o','m',0x00};
++    //static char domain2[16] = {0x06,'i','c','l','o','u','d',0x03,'c','o','m',0x00};
++    //static char domain3[16] = {0x06,'g','o','o','g','l','e',0x03,'c','o','m',0x00};
++    /* huawei connectivitycheck.platform.hicloud.com */
++    //static char domain4[16] = {0x07,'h','i','c','l','o','u','d',0x03,'c','o','m',0x00};
++    /* xiaomi connect.rom.miui.com */
++    //static char domain5[16] = {0x04,'m','i','u','i',0x03,'c','o','m',0x00};
++    char domainBuf[128];
++    int ret=0, i=0;
++
++    memset(domainBuf, 0, sizeof(domainBuf));
++    ret = br_decode_dns_name(domain, domainBuf, sizeof(domainBuf));
++    //printk("[%s][%d] ret=[%d]\n", __FUNCTION__, __LINE__, ret);
++
++    for(i=0; i<sgDnsCnt; i++)
++    {
++        //printk("[%s][%d] sgNetgearDns[%d]=[%s]\n", __FUNCTION__, __LINE__, i, sgNetgearDns[i]);
++        if (strstr(domainBuf, sgNetgearDns[i]))
++        {
++            return 1;
++        }
++    }
++    return 0;
++}
++
++static int dns_query_name_sizeof(unsigned char *name)
++{
++    int size = 0;
++
++    if (NULL == name)
++    {
++        return size;
++    }
++    size = strlen(name) + 1;
++    //while (name[size++] != 0);
++    return size;
++}
++
++static int br_dns_netgearresponse(struct sk_buff *skb,u_int32_t  dns_ttl)
++{
++    struct sk_buff *newskb = NULL;
++    struct ethhdr *eth = NULL;
++    struct iphdr *iph = NULL;
++    struct ipv6hdr *ipv6h = NULL;
++    struct ethhdr *neweth = NULL;
++    struct ipv6hdr *newipv6h = NULL;
++    struct iphdr *newiph = NULL;
++    struct udphdr *udph = NULL;
++    struct udphdr *newudph = NULL;
++    u_int32_t udplen, newlen, newudplen;
++    u_int32_t maxQueryLen = 0;
++    u_int32_t domainLen = 0;
++    unsigned int dnsanSize = 0;
++    struct dns_header *dns_hdr = NULL;
++    unsigned char *dns_query = NULL;
++    unsigned int *tol = NULL;
++    unsigned short *dl = NULL;
++    __be32 *anip = NULL;
++    struct in6_addr *anip6 = NULL;
++    unsigned char *dns_response = NULL;
++    unsigned int query_size = 0;
++    unsigned char isIpv4 = 0;
++    unsigned char dns_type = 0;
++    unsigned char isApple = 0;
++
++    /* caculate new UDP packet length */
++    eth = eth_hdr(skb);
++    if (eth->h_proto == htons(ETH_P_IP))
++    {
++        isIpv4 = 1;
++        iph = (struct iphdr *)skb_network_header(skb);
++        udph = (struct udphdr *)(((unsigned char *)iph) + (iph->ihl<<2));
++    }
++    else if (eth->h_proto == htons(ETH_P_IPV6))
++    {
++        isIpv4 = 0;
++        ipv6h = (struct ipv6hdr *)skb_network_header(skb);
++        udph = (struct udphdr *)((unsigned char *)ipv6h + sizeof(struct ipv6hdr));//ipv6 header's fixed-lenght is 40
++    }
++
++    dns_hdr = (struct dns_header *)((unsigned char *)udph + sizeof(struct udphdr));
++    dns_query = (unsigned char *)dns_hdr + sizeof(struct dns_header);
++    domainLen = dns_query_name_sizeof((unsigned char *)dns_query);
++    udplen = ntohs(udph->len);
++    maxQueryLen = udplen - sizeof(struct udphdr) - sizeof(struct dns_header) - 4;
++    if (domainLen > maxQueryLen)
++    {
++        return 0;
++    }
++    isApple = isApple_google_domain(dns_query, domainLen);
++
++    if (htons(*(short *) (dns_query + domainLen)) == 0x0001
++            && htons(*(short *) (dns_query + domainLen + 2)) == 0x0001)
++    {
++        dns_type = 0; /*ipv4*/
++        dnsanSize = domainLen + 10 + 4;
++    }
++    else if (htons(*(short *) (dns_query + domainLen))== 0x001c
++            && htons(*(short *) (dns_query + domainLen + 2)) == 0x0001)
++    {
++        dns_type = 1; /*ipv6 */
++        dnsanSize = domainLen + 10 + 16;
++    }
++    else
++    {
++        dns_type = 2; /*others */
++        dnsanSize = 0;
++    }
++
++    if (isApple == 1)
++    {
++        dns_type = 2; /*others */
++        dnsanSize = 0;
++    }
++
++    newudplen = udplen + dnsanSize;
++
++    if (isIpv4)
++    {
++        newlen = iph->ihl*4 + newudplen;
++    }
++    else
++    {
++        newlen = sizeof(struct ipv6hdr) + newudplen;
++    }
++
++    skb_push(skb, ETH_HLEN);
++    newskb = skb_copy_expand(skb, skb_headroom(skb), dnsanSize, GFP_ATOMIC);
++    skb_pull(skb, ETH_HLEN);
++
++    if (NULL == newskb)
++    {
++        return 0;
++    }
++
++    skb_put(newskb, dnsanSize);
++
++    /* reverse destinate MAC and source MAC*/
++    neweth = eth_hdr(newskb);
++    memcpy(neweth->h_source, eth->h_dest, ETH_ALEN);
++    memcpy(neweth->h_dest, eth->h_source, ETH_ALEN);
++
++    /* reverse destinate IP and source IP */
++    if (isIpv4)
++    {
++        /* reverse destinate IP and source IP */
++        newiph = (struct iphdr *)skb_network_header(newskb);
++        newiph->saddr = iph->daddr;
++        newiph->daddr = iph->saddr;
++
++        /*modify the rest of IP packet values */
++        newiph->tot_len = htons(newlen);
++        newiph->id = 0;
++        newiph->frag_off = htons(0x4000); // do not fragment
++        newiph->ttl = 64;
++
++        newudph = (void *)newiph + newiph->ihl*4;
++    }
++    else
++    {
++        newipv6h = (struct ipv6hdr *)skb_network_header(newskb);
++        newipv6h->saddr = ipv6h->daddr;
++        newipv6h->daddr = ipv6h->saddr;
++        newipv6h->payload_len = htons(newudplen);
++        newudph = (void *)newipv6h + sizeof(struct ipv6hdr);
++    }
++
++    /* modify UDP packet values */
++    newudph->source = udph->dest;
++    newudph->dest = udph->source;;
++    newudph->len = htons(newudplen);
++
++    /*modify DNS packet values */
++    dns_hdr = (struct dns_header *)((unsigned char *)newudph + sizeof(struct udphdr));
++    if ((0 == dns_type) || (1 == dns_type))
++    {
++        dns_hdr->flags = htons(0x8180); // standard query response, no error
++        dns_hdr->ancount = htons(1);
++    }
++    else
++    {
++        dns_hdr->flags = htons(0x8185); // Refused 8185 for AAA type
++        dns_hdr->ancount = htons(0);
++    }
++
++    /* add DNS answer */
++    if (0 == dns_type)
++    {
++        query_size = dnsanSize - (6 + 4);
++        dns_query = (unsigned char *)dns_hdr + sizeof(struct dns_header);
++        dns_response = (unsigned char *)dns_query + query_size;
++        memcpy(dns_response, dns_query, dnsanSize);
++        tol = (unsigned int *)(dns_response + query_size);
++        *tol = htonl(dns_ttl);
++        dl    = (unsigned short *)(dns_response + query_size + 4);
++        *dl   = htons(4);
++        anip  = (__be32 *)(dns_response + query_size + 6);
++        *anip = (__be32)(netgear_dns_hijackip); //force to the LAN Manage IP
++    }
++    else if (1 == dns_type)
++    {
++        query_size = dnsanSize - (6 + 16);
++        dns_query = (unsigned char *)dns_hdr + sizeof(struct dns_header);
++        dns_response = (unsigned char *)dns_query + query_size;
++        memcpy(dns_response, dns_query, dnsanSize);
++        tol = (unsigned int *)(dns_response + query_size);
++        *tol = htonl(dns_ttl);
++        dl    = (unsigned short *)(dns_response + query_size + 4);
++        *dl   = htons(16);
++        anip6  = (struct in6_addr *)(dns_response + query_size + 6);
++        *anip6 = netgear_dns_hijackip6; //force to the LAN Manage IP
++    }
++
++    if (isIpv4)
++    {
++        if (newudph->check != 0)
++        {
++            newudph->check = 0;
++            newudph->check = csum_tcpudp_magic(newiph->saddr, newiph->daddr,
++                                                    newudplen, IPPROTO_UDP,
++                                                    csum_partial((char *)newudph,newudplen, 0));
++        }
++        ip_send_check(newiph); //ip checksum
++    }
++    else
++    {
++        if (newudph->check != 0)
++        {
++            newudph->check = 0;
++            newudph->check = csum_ipv6_magic(&newipv6h->saddr, &newipv6h->daddr,
++                                                newudplen, IPPROTO_UDP,
++                                                csum_partial((char *)newudph,newudplen, 0));
++            if (newudph->check == 0)
++                newudph->check = CSUM_MANGLED_0;
++        }
++    }
++
++    if (newskb->dev != NULL
++                && newskb->dev->netdev_ops != NULL
++                && newskb->dev->netdev_ops->ndo_start_xmit != NULL)
++    {
++        newskb->dev->netdev_ops->ndo_start_xmit(newskb, newskb->dev);
++    }
++
++    return 1;
++}
++
++static int br_dns_netgearfilter(struct sk_buff *skb)
++{
++    struct ethhdr *eth     = (struct ethhdr *)skb_mac_header(skb);
++    struct iphdr *iph        = NULL;
++    struct ipv6hdr *ipv6h = NULL;
++    struct udphdr *udph  = NULL;
++    char *queryph           = NULL;
++    struct dns_header *dnsph = NULL;
++    int udplen = 0;
++    int queryslen = 0;
++    int i = 0;
++    int len = 0;
++    char *domain = NULL;
++    char maindomain[] ={0x03,'w','w','w'};
++    char netGearDomain[] = {0x0b,'r','o','u','t','e','r','l','o','g','i','n'};
++    char netGearDomain3[] = {0x03,'c','o','m','\0'};
++    char netGearDomain4[] = {0x03,'n','e','t','\0'};
++
++    if (eth->h_proto != htons(ETH_P_IP)  && eth->h_proto != htons(ETH_P_IPV6))
++    {
++        return 1;
++    }
++
++    if (eth->h_proto == htons(ETH_P_IP))
++    {
++        iph = (struct iphdr *) skb->data;
++        if (iph->protocol != 17)
++        {
++            return 1;
++        }
++        udph = (struct udphdr *)(((unsigned char *)iph) + (iph->ihl<<2));
++    }
++    else if (eth->h_proto == htons(ETH_P_IPV6))
++    {
++        ipv6h = (struct ipv6hdr *) skb->data;
++        if (ipv6h->nexthdr != 17)
++        {
++            return 1;
++        }
++        udph = (struct udphdr *)((unsigned char *)ipv6h + sizeof(struct ipv6hdr));//ipv6 header's fixed-lenght is 40
++    }
++
++    if (udph->dest != ntohs(53))
++    {
++        return 1;
++    }
++
++    udplen = ntohs(udph->len);
++#if 0
++    /*TBD data header point ip header*/
++	if (udplen > (skb->tail - skb->data))
++    {
++        return 1;
++    }
++#endif
++    if (udplen <= sizeof(struct udphdr) + sizeof(struct dns_header))
++    {
++        return 1;
++    }
++
++    dnsph = (struct dns_header *) ((char *)udph + sizeof(struct udphdr));
++    /*filter dns query*/
++    if (ntohs(dnsph->flags) & 0xF800)
++    {
++        return 1;
++    }
++
++    if (dnsph->qdcount <= 0)
++    {
++        return 1;
++    }
++
++    if (netgear_dns_hijack == 2)
++    {
++        return 0;
++    }
++
++    queryph = (char *) ((char *)dnsph + sizeof(struct dns_header));
++    queryslen = udplen - sizeof(struct udphdr) - sizeof(struct dns_header);
++    domain = queryph;
++    for (i = 0; i < ntohs(dnsph->qdcount); i++)
++    {
++        if (strncasecmp(domain, maindomain, sizeof(maindomain)) == 0)
++        {
++            domain += sizeof(maindomain);
++            len += sizeof(maindomain);
++        }
++
++        if (strncasecmp(domain, netGearDomain, sizeof(netGearDomain)) == 0)
++        {
++            domain += sizeof(netGearDomain);
++            len += sizeof(netGearDomain);
++
++			if ((strncasecmp(domain, netGearDomain3, sizeof(netGearDomain3)) == 0) || 
++				((strncasecmp(domain, netGearDomain4, sizeof(netGearDomain4)) == 0)))
++			{
++				domain += strlen(domain) + 1;
++				len += strlen(domain) + 1;
++				if ((len + 4 <= queryslen)
++						&& htons((*(short *) (domain))) == 0x0001
++						&& (htons(*(short *) (domain + 2))) == 0x0001)
++				{
++					return 0;
++				}
++				else
++				{
++					return 0;
++				}
++			}
++        }
++        /*only compare the first query TBD*/
++        break;
++    }
++    return 1;
++}
++
++int br_dns_netgear(struct sk_buff *skb)
++{
++    if (netgear_dns_hijack == 0)
++    {
++        return 1;
++    }
++
++    if (0 == br_dns_netgearfilter(skb))
++    {
++        br_dns_netgearresponse(skb, DNS_TTL);
++        return 0;
++    }
++    return 1;
++}
++
++#endif
+ 
+ static int
+ br_netif_receive_skb(struct net *net, struct sock *sk, struct sk_buff *skb)
+@@ -149,6 +872,8 @@ int br_handle_frame_finish(struct net *n
+ 	if (p->flags & BR_LEARNING)
+ 		br_fdb_update(br, p, eth_hdr(skb)->h_source, vid, false);
+ 
++	//br_dhcp_packet(skb, p->br->dev->dev_addr, dest); //add by cecilia
++
+ 	if (!is_broadcast_ether_addr(dest) && is_multicast_ether_addr(dest) &&
+ 	    br_multicast_rcv(br, p, skb, vid))
+ 		goto drop;
+@@ -302,6 +1027,12 @@ rx_handler_result_t br_handle_frame(stru
+ forward:
+ 	switch (p->state) {
+ 	case BR_STATE_FORWARDING:
++#ifdef CONFIG_TW_DNS_HIJACK
++		if(br_dns_netgear(skb) == 0) {
++			kfree_skb(skb);
++			return RX_HANDLER_CONSUMED;
++		}
++#endif
+ 		rhook = rcu_dereference(br_should_route_hook);
+ 		if (rhook) {
+ 			if ((*rhook)(skb)) {
+--- a/net/bridge/br_private.h
++++ b/net/bridge/br_private.h
+@@ -42,6 +42,12 @@
+ /* Path to usermode spanning tree program */
+ #define BR_STP_PROG	"/sbin/bridge-stp"
+ 
++#define CONFIG_TW_DNS_HIJACK
++#ifdef CONFIG_TW_DNS_HIJACK
++#define NETGEAT_MAX_DNS_NUM     (128)
++#define NETGEAT_MAX_DNS_LEN     (64)
++#endif
++
+ typedef struct bridge_id bridge_id;
+ typedef struct mac_addr mac_addr;
+ typedef __u16 port_id;
+--- /dev/null
++++ b/net/bridge/dhcpd.h
+@@ -0,0 +1,39 @@
++
++#ifndef UDHCP_DHCPD_H
++#define UDHCP_DHCPD_H 1
++
++#define OPTION_FIELD    0
++#define FILE_FIELD      1
++#define SNAME_FIELD     2
++
++#define DHCP_PADDING       0x00
++#define DHCP_HOST_NAME     0x0c /* either client informs server or server gives name to client */
++#define DHCP_REQUESTED_IP  0x32 /* sent by client if specific IP is wanted */
++#define DHCP_PKT_TYPE      0x35
++#define DHCP_OPTION_OVER   0x34
++#define DHCP_END           0xFF
++
++#define OPT_CODE 0
++#define OPT_LEN 1
++#define OPT_DATA 2
++
++struct dhcpMessage {
++    u_int8_t op;
++    u_int8_t htype;
++    u_int8_t hlen;
++    u_int8_t hops;
++    u_int32_t xid;
++    u_int16_t secs;
++    u_int16_t flags;
++    u_int8_t ciaddr[4];
++    u_int8_t yiaddr[4];
++    u_int8_t siaddr[4];
++    u_int8_t giaddr[4];
++    u_int8_t chaddr[16];
++    u_int8_t sname[64];
++    u_int8_t file[128];
++    u_int32_t cookie;
++    u_int8_t options[308]; /* 312 - cookie */
++};
++
++#endif

@@ -1,0 +1,30 @@
+Index: linux-4.4.198/drivers/net/ethernet/mediatek/mtk_eth_soc.c
+===================================================================
+--- linux-4.4.198.orig/drivers/net/ethernet/mediatek/mtk_eth_soc.c
++++ linux-4.4.198/drivers/net/ethernet/mediatek/mtk_eth_soc.c
+@@ -2092,12 +2092,16 @@ static void mtk_poll_controller(struct n
+ static int mtk_start_dma(struct mtk_eth *eth)
+ {
+ 	int err;
++	static int dma_init_flag = 0;
+ 
++	if(dma_init_flag == 0){
+ 	err = mtk_dma_init(eth);
+ 	if (err) {
+ 		mtk_dma_free(eth);
+ 		return err;
+ 	}
++		dma_init_flag = 1;
++	}
+ 
+ 	mtk_w32(eth,
+ 		MTK_TX_WB_DDONE | MTK_TX_DMA_EN |
+@@ -2205,8 +2209,6 @@ static int mtk_stop(struct net_device *d
+ 	mtk_stop_dma(eth, MTK_QDMA_GLO_CFG);
+ 	mtk_stop_dma(eth, MTK_PDMA_GLO_CFG);
+ 
+-	mtk_dma_free(eth);
+-
+ 	return 0;
+ }
+ 

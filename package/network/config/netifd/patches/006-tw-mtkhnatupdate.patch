@@ -1,0 +1,85 @@
+--- a/system-linux.c
++++ b/system-linux.c
+@@ -1151,13 +1151,81 @@ static int system_vlan(struct device *de
+ 	return ioctl(sock_ioctl, SIOCSIFVLAN, &ifr);
+ }
+ 
++static int mtkhnat_update_ppddev(char *ifname, int id)
++{
++#if 1
++	char cmdbuf[128] = {0};
++	if (!strstr(ifname, "eth0"))
++	{
++		return 0;
++	}
++	/* mtk7622 use vlan device, so wifi and lan hnat dev need update modify by sdong 20201230 */
++	if (access("/usr/bin/mtkhnat_updateppd.sh", 0) == 0)
++	{
++		if (id >= 0)
++		{
++			snprintf(cmdbuf, sizeof(cmdbuf), "/usr/bin/mtkhnat_updateppd.sh add %s.%d", ifname, id);
++		}
++		else
++		{
++			snprintf(cmdbuf, sizeof(cmdbuf), "/usr/bin/mtkhnat_updateppd.sh rem %s", ifname);
++		}
++		//system(cmdbuf);
++	}
++#else
++	FILE *fd = NULL;
++	char wanif[16] = {0};
++	char lanif[16] = {0};
++	char ppdif[16] = {0};
++	char gppddev[16] = {0};
++	char cmdbuf[128] = {0};
++
++	/* hnat_priv wan=eth0 lan=eth0 ppd=eth0.1 g_ppdev=eth0.1 */
++	fd = fopen("/sys/kernel/debug/hnat/hnat_ppd_if", "r");
++	if (fd == NULL)
++	{
++		return -1;
++	}
++
++	if (fgets(cmdbuf, sizeof(cmdbuf), fd))
++	{
++		sscanf(cmdbuf, "hnat_priv wan=%s lan=%s ppd=%s g_ppdev=%s", 
++			wanif, lanif, ppdif, gppddev);
++	}
++	fclose(fd);
++
++	if (id >= 0)
++	{
++		/* add ppd vlan dev*/
++		if ((strcmp(gppddev, "eth0") == 0) || (gppddev[0] == 0))
++		{
++			snprintf(cmdbuf, sizeof(cmdbuf), "echo %s.%d > /sys/kernel/debug/hnat/hnat_ppd_if", ifname, id);
++			system(cmdbuf);
++		}
++	}
++	else
++	{
++		/* release ppd vlan dev*/
++		if (!strcmp(ifname, gppddev))
++		{
++			system("echo eth0 > /sys/kernel/debug/hnat/hnat_ppd_if");
++		}
++	}
++#endif
++	return 0;
++}
++
+ int system_vlan_add(struct device *dev, int id)
+ {
+-	return system_vlan(dev, id);
++	int ret = 0;
++	ret = system_vlan(dev, id);
++	mtkhnat_update_ppddev(dev->ifname, id);
++	return ret;
+ }
+ 
+ int system_vlan_del(struct device *dev)
+ {
++	mtkhnat_update_ppddev(dev->ifname, -1);
+ 	return system_vlan(dev, -1);
+ }
+ 

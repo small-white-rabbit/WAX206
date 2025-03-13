@@ -1,0 +1,49 @@
+--- a/includes.c
++++ b/includes.c
+@@ -192,9 +192,34 @@ run_include(struct fw3_include *include)
+ 		"config() { "
+ 			"echo \"You cannot use UCI in firewall includes!\" >&2; "
+ 			"exit 1; "
+-		"}; . %s";
++		"}; %s %s";
+ 
+ 	char buf[PATH_MAX + sizeof(tmpl)];
++    char pbuf[BUFSIZ] = {0};
++    char cmd_line[64] = {0};
++    char shell_cmd[64] = {0};
++    char * find;
++    FILE *fp;
++
++    sprintf(cmd_line, "which bash 2>/dev/null");
++    fp = popen(cmd_line, "r");
++    if (fp != NULL)
++    {
++        fgets(pbuf, sizeof(pbuf), fp);
++        pclose(fp);
++        find = strchr(pbuf, '\n');
++        if(find)
++            *find = '\0';
++    }
++
++    if (strstr(pbuf, "bash") != NULL)
++    {
++        strncpy(shell_cmd, pbuf, sizeof(shell_cmd));
++    }
++    else
++    {
++        strncpy(shell_cmd, ".", sizeof(shell_cmd));
++    }
+ 
+ 	info(" * Running script '%s'", include->path);
+ 
+@@ -203,8 +228,8 @@ run_include(struct fw3_include *include)
+ 		info("   ! Skipping due to path error: %s", strerror(errno));
+ 		return;
+ 	}
+-
+-	snprintf(buf, sizeof(buf), tmpl, include->path);
++        
++	snprintf(buf, sizeof(buf), tmpl, shell_cmd, include->path);
+ 	rv = system(buf);
+ 
+ 	if (rv)

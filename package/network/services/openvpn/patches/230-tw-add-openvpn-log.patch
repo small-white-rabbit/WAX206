@@ -1,0 +1,74 @@
+Index: openvpn-2.4.2/src/openvpn/ping.c
+===================================================================
+--- openvpn-2.4.2.orig/src/openvpn/ping.c
++++ openvpn-2.4.2/src/openvpn/ping.c
+@@ -55,6 +55,7 @@ const uint8_t ping_string[] = {
+ void
+ check_ping_restart_dowork(struct context *c)
+ {
++    char tmp_buf[128] = {0};
+     struct gc_arena gc = gc_new();
+     switch (c->options.ping_rec_timeout_action)
+     {
+@@ -66,6 +67,10 @@ check_ping_restart_dowork(struct context
+             break;
+ 
+         case PING_RESTART:
++            sprintf(tmp_buf, "echo %s | awk -F ']' '{print $2}' > /tmp/openvpn/connectdrop_ip",
++                    print_link_socket_actual(c->c2.to_link_addr, &gc));
++            system(tmp_buf);
++            system("/usr/bin/openvpn_log.sh connection_drop $(cat /tmp/openvpn/connectdrop_ip)");
+             msg(M_INFO, "%sInactivity timeout (--ping-restart), restarting",
+                 format_common_name(c, &gc));
+             c->sig->signal_received = SIGUSR1; /* SOFT-SIGUSR1 -- Ping Restart */
+Index: openvpn-2.4.2/src/openvpn/socket.c
+===================================================================
+--- openvpn-2.4.2.orig/src/openvpn/socket.c
++++ openvpn-2.4.2/src/openvpn/socket.c
+@@ -2324,6 +2324,10 @@ link_socket_connection_initiated(const s
+         buf_printf(&out, "Peer Connection Initiated with %s", print_link_socket_actual(&info->lsa->actual, &gc));
+         sprintf(tmp_buf, "echo %s | awk -F ']' '{print $2}' |awk -F ':' '{print $1}'> /tmp/openvpn/client_ip", print_link_socket_actual(&info->lsa->actual, &gc));
+         system(tmp_buf);
++        memset(tmp_buf, 0, sizeof(tmp_buf));
++        sprintf(tmp_buf, "echo %s | awk -F ']' '{print $2}' > /tmp/openvpn/connection_successfully_client", print_link_socket_actual(&info->lsa->actual, &gc));
++        system(tmp_buf);
++        system("/usr/bin/openvpn_log.sh connection_successfully $(cat /tmp/openvpn/connection_successfully_client)");
+         msg(M_INFO, "%s", BSTR(&out));
+     }
+ 
+Index: openvpn-2.4.2/src/openvpn/ssl.c
+===================================================================
+--- openvpn-2.4.2.orig/src/openvpn/ssl.c
++++ openvpn-2.4.2/src/openvpn/ssl.c
+@@ -3077,6 +3077,13 @@ error:
+     tls_clear_error();
+     ks->state = S_ERROR;
+     msg(D_TLS_ERRORS, "TLS Error: TLS handshake failed");
++    {
++        char tmp_buf[128] = {0};
++        sprintf(tmp_buf, "echo %s | awk -F ']' '{print $2}' > /tmp/openvpn/unauth_ip",
++                print_link_socket_actual(&session->untrusted_addr, &gc));
++        system(tmp_buf);
++        system("/usr/bin/openvpn_log.sh connection_fail $(cat /tmp/openvpn/unauth_ip)");
++    }
+     INCR_ERROR;
+     gc_free(&gc);
+     return false;
+Index: openvpn-2.4.2/src/openvpn/ssl_verify.c
+===================================================================
+--- openvpn-2.4.2.orig/src/openvpn/ssl_verify.c
++++ openvpn-2.4.2/src/openvpn/ssl_verify.c
+@@ -788,8 +788,13 @@ cleanup:
+ 
+     if (ret != SUCCESS)
+     {
++        char tmp_buf[128] = {0};
+         tls_clear_error(); /* always? */
+         session->verified = false; /* double sure? */
++        sprintf(tmp_buf, "echo %s | awk -F ']' '{print $2}' > /tmp/openvpn/unauth_ip",
++                print_link_socket_actual(&session->untrusted_addr, &gc));
++        system(tmp_buf);
++        system("/usr/bin/openvpn_log.sh connection_fail $(cat /tmp/openvpn/unauth_ip)");
+     }
+     gc_free(&gc);
+ 

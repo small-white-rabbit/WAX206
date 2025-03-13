@@ -1,0 +1,70 @@
+--- a/drivers/net/ethernet/mediatek/mtk_hnat/hnat.c
++++ b/drivers/net/ethernet/mediatek/mtk_hnat/hnat.c
+@@ -243,6 +243,7 @@ static int hnat_start(void)
+ 	}
+ 
+ 	hnat_priv->g_ppdev = dev_get_by_name(&init_net, hnat_priv->ppd);
++	hnat_priv->g_wandev= dev_get_by_name(&init_net, hnat_priv->wan);
+ 
+ 	dev_info(hnat_priv->dev, "hwnat start\n");
+ 
+@@ -359,6 +360,9 @@ static void hnat_release_netdev(void)
+ 
+ 	if (hnat_priv->g_ppdev)
+ 		dev_put(hnat_priv->g_ppdev);
++
++	if (hnat_priv->g_wandev)
++		dev_put(hnat_priv->g_wandev);
+ }
+ 
+ static struct notifier_block nf_hnat_netdevice_nb __read_mostly = {
+--- a/drivers/net/ethernet/mediatek/mtk_hnat/hnat.h
++++ b/drivers/net/ethernet/mediatek/mtk_hnat/hnat.h
+@@ -550,6 +550,7 @@ struct mtk_hnat {
+ 
+ 	u32 foe_etry_num;
+ 	struct net_device *g_ppdev;
++	struct net_device *g_wandev;
+ 	struct net_device *wifi_hook_if[MAX_IF_NUM];
+ 	struct extdev_entry *ext_if[MAX_EXT_DEVS];
+ 	struct timer_list hnat_sma_build_entry_timer;
+--- a/drivers/net/ethernet/mediatek/mtk_hnat/hnat_nf_hook.c
++++ b/drivers/net/ethernet/mediatek/mtk_hnat/hnat_nf_hook.c
+@@ -107,11 +107,11 @@ static inline struct net_device *get_dev
+ 
+ static inline struct net_device *get_wandev_from_index(int index)
+ {
+-	struct net_device *wandev = 0;
++	if (!hnat_priv->g_wandev)
++		hnat_priv->g_wandev = dev_get_by_name(&init_net, hnat_priv->wan);
+ 
+-	wandev = dev_get_by_name(&init_net, hnat_priv->wan);
+-	if (wandev->ifindex == index)
+-		return wandev;
++	if (hnat_priv->g_wandev && hnat_priv->g_wandev->ifindex == index)
++		return hnat_priv->g_wandev;
+ 	return NULL;
+ }
+ 
+@@ -238,12 +238,21 @@ int nf_hnat_netdevice_event(struct notif
+ 			hnat_priv->g_ppdev = NULL;
+ 			dev_put(dev);
+ 		}
++		if (IS_WAN(dev) && hnat_priv->g_wandev)
++		{
++			hnat_priv->g_wandev = NULL;
++			dev_put(dev);
++		}
+ 		break;
+ 	case NETDEV_REGISTER:
+ 		if (IS_PPD(dev) && !hnat_priv->g_ppdev)
+ 		{
+ 			hnat_priv->g_ppdev = dev_get_by_name(&init_net, hnat_priv->ppd);
+ 		}
++		if (IS_WAN(dev) && !hnat_priv->g_wandev)
++		{
++			hnat_priv->g_wandev = dev_get_by_name(&init_net, hnat_priv->wan);
++		}
+ 		break;
+ 	default:
+ 	break;

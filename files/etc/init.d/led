@@ -1,0 +1,63 @@
+#!/bin/sh /etc/rc.common
+# Copyright (C) 2008 OpenWrt.org
+
+START=96
+load_led() {
+	local name
+	local board
+	local colour
+	local power_ctl
+
+	config_get name $1 name
+	config_get board $1 board
+	config_get colour $1 colour
+	config_get power_ctl $1 power_ctl
+
+	[ -n "${name}" ] && [ -n "${power_ctl}" ] && {
+		echo " led ${name} ctrl on..."
+		echo 0 > /sys/class/leds/${board}:mixed:${name}/power_ctl
+		echo 0 > /sys/class/leds/${board}:green:${name}/power_ctl
+		echo 0 > /sys/class/leds/${board}:red:${name}/power_ctl
+		case "$colour" in
+			"green"|"red"){
+				echo " led ${name} ctrl signel..."
+				echo ${power_ctl} > /sys/class/leds/${board}:${colour}:${name}/power_ctl
+				}
+				;;
+			"mixed"){
+				echo " led ${name} ctrl mixed..."
+				echo ${power_ctl} > /sys/class/leds/${board}:green:${name}/power_ctl
+				echo ${power_ctl} > /sys/class/leds/${board}:red:${name}/power_ctl
+				}
+				;;
+			esac
+	}
+	
+}
+
+load_ledcontrolMode()
+{
+	[ ! -f /var/run/ledinit.state ] && {
+		touch /var/run/ledinit.state
+		led.sh default-on power red
+	}
+	led.sh none power red
+	led.sh default-on power green
+	local ledMode="$(uci get system.@system[0].ledControlMode 2>/dev/null)"
+	ledMode="${ledMode:-"0"}"
+	if [ "$ledMode" = "3" ]; then
+		#all led not blink
+		tw_vty -c "eth-led normal-no-blink" > /dev/null 2>&1
+	elif [ "$ledMode" = "4" ]; then
+		#all led off
+		tw_vty -c "eth-led off" > /dev/null 2>&1
+	fi
+}
+
+start() {
+	[ -e /sys/class/leds/ ] && {
+		config_load system
+		config_foreach load_led led
+	}
+	load_ledcontrolMode
+}

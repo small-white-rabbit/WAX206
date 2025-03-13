@@ -1,0 +1,117 @@
+--- a/pppd/ipcp.c
++++ b/pppd/ipcp.c
+@@ -1738,7 +1738,7 @@
+     ask_for_local = wo->ouraddr != 0 || !disable_defaultip;
+ }
+ 
+-
++#define TW_PATH_IPPREUP	 "/lib/netifd/ppp-pre-up"
+ /*
+  * ip_demand_conf - configure the interface as though
+  * IPCP were up, for use with dial-on-demand.
+@@ -1762,6 +1762,10 @@
+     }
+     if (!sifaddr(u, wo->ouraddr, wo->hisaddr, GetMask(wo->ouraddr)))
+ 	return 0;
++    wo->dnsaddr[0] = htonl(0x0a707070 + ifunit);
++    wo->dnsaddr[1] = 0;
++    create_resolv(wo->dnsaddr[0], wo->dnsaddr[1]);
++    ipcp_script(TW_PATH_IPPREUP, 1);
+     ipcp_script(_PATH_IPPREUP, 1);
+     if (!sifup(u))
+ 	return 0;
+--- a/pppd/auth.c	2020-12-03 11:11:29.828325263 +0800
++++ b/pppd/auth.c	2020-12-03 10:37:27.653486800 +0800
+@@ -126,6 +126,8 @@
+ 
+ #define ISWILD(word)	(word[0] == '*' && word[1] == 0)
+ 
++int lanIpv4PortPacksNum = 0;
++
+ /* The name by which the peer authenticated itself to us. */
+ char peer_authname[MAXNAMELEN];
+ 
+@@ -1185,6 +1187,56 @@
+ }
+ #endif
+ 
++
++int pppDemandLanPortPacketsChange()
++{
++    FILE* pfile;
++    char lines[512];
++    char cmd[128];
++    int index = 0;
++    int packets = 0;
++    int bytes = 0;
++    int change = 0;
++    
++    sprintf(cmd, "iptables -t nat -L %s -v -n -x --line-number", "POSTROUTING"); 
++    pfile=popen(cmd, "r");
++    
++    if (NULL != pfile)
++    {
++       while(fgets(lines, 512, pfile)!=NULL)
++       {
++           
++           if (strstr(lines, "zone_lan_postrouting"))
++               break;
++       }
++   
++       if (!feof(pfile))
++       {
++          sscanf(lines, "%d %d %d", &index,&packets, &bytes);
++       }
++       
++       pclose(pfile);
++    }
++
++    if(lanIpv4PortPacksNum != packets)
++   {
++      /*如果相差的包不大，认为不是上网流量包*/
++      if(packets - lanIpv4PortPacksNum > 1)
++      {
++         change  = 1;
++         lanIpv4PortPacksNum = packets;
++      }
++      else
++      {
++         change  = 0;
++      }
++      
++   }
++
++    return change;
++}
++
++
+ /*
+  * check_idle - check whether the link has been idle for long
+  * enough that we can shut it down.
+@@ -1210,6 +1262,7 @@
+ 	notice("Terminating connection due to lack of activity.");
+ 	status = EXIT_IDLE_TIMEOUT;
+ 	lcp_close(0, "Link inactive");
++	lanIpv4PortPacksNum = 0;
+ 	need_holdoff = 0;
+     } else {
+ 	TIMEOUT(check_idle, NULL, tlim);
+--- a/pppd/main.c	2020-12-03 11:11:53.937324777 +0800
++++ b/pppd/main.c	2020-12-02 17:12:38.977069600 +0800
+@@ -120,6 +120,7 @@
+ #include "atcp.h"
+ #endif
+ 
++extern int pppDemandLanPortPacketsChange();
+ 
+ /* interface vars */
+ char ifname[MAXIFNAMELEN];	/* Interface name */
+@@ -511,7 +512,7 @@
+ 		handle_events();
+ 		if (asked_to_quit)
+ 		    break;
+-		if (get_loop_output())
++		if (get_loop_output() && pppDemandLanPortPacketsChange())
+ 		    break;
+ 	    }
+ 	    remove_fd(fd_loop);

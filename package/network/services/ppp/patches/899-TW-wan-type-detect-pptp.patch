@@ -1,0 +1,21 @@
+Index: ppp-2.4.7/pppd/plugins/pptp/pptp_ctrl.c
+===================================================================
+--- ppp-2.4.7.orig/pppd/plugins/pptp/pptp_ctrl.c
++++ ppp-2.4.7/pppd/plugins/pptp/pptp_ctrl.c
+@@ -770,6 +770,16 @@ int ctrlp_disp(PPTP_CONN * conn, void *
+                 memcpy(conn->vendor, packet->vendor, sizeof(conn->vendor));
+                 pptp_reset_timer(); /* 60 seconds until keep-alive */
+                 dbglog("Client connection established.");
++                if (0 == access("/tmp/wan_det_pptp", 0))
++                {
++                    FILE *fp = NULL;
++                    char str[] = "pptp";
++
++                    fp = fopen("/tmp/wan_det_pptp", "w+");
++                    fwrite(str, sizeof(str) , 1, fp);
++
++                    fclose(fp);
++                }
+                 if (conn->callback != NULL)
+                     conn->callback(conn, CONN_OPEN_DONE);
+             } /* else goto pptp_conn_close; */

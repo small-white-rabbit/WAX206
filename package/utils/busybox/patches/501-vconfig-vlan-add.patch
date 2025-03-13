@@ -1,0 +1,13 @@
+Index: busybox-1.25.1/networking/vconfig.c
+===================================================================
+--- busybox-1.25.1.orig/networking/vconfig.c
++++ busybox-1.25.1/networking/vconfig.c
+@@ -137,7 +137,7 @@ int vconfig_main(int argc, char **argv)
+ 			ifr.vlan_qos = xatou_range(argv[3], 0, 7);
+ 		} else if (ifr.cmd == ADD_VLAN_CMD) {
+ 			/* add */
+-			ifr.u.VID = xatou_range(p, 0, VLAN_GROUP_ARRAY_LEN - 1);
++			ifr.u.VID = xatou_range(p, 0, VLAN_GROUP_ARRAY_LEN);
+ 		} else if (ifr.cmd != DEL_VLAN_CMD) {
+ 			/* set_{egress|ingress}_map */
+ 			ifr.u.skb_priority = xatou(p);

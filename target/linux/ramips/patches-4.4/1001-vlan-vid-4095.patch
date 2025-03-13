@@ -1,0 +1,113 @@
+Index: linux-4.4.198/net/8021q/vlan.c
+===================================================================
+--- linux-4.4.198.orig/net/8021q/vlan.c
++++ linux-4.4.198/net/8021q/vlan.c
+@@ -212,7 +212,7 @@ static int register_vlan_device(struct n
+ 	char name[IFNAMSIZ];
+ 	int err;
+ 
+-	if (vlan_id >= VLAN_VID_MASK)
++	if (vlan_id > VLAN_VID_MASK)
+ 		return -ERANGE;
+ 
+ 	err = vlan_check_real_dev(real_dev, htons(ETH_P_8021Q), vlan_id);
+Index: linux-4.4.198/net/8021q/vlan_netlink.c
+===================================================================
+--- linux-4.4.198.orig/net/8021q/vlan_netlink.c
++++ linux-4.4.198/net/8021q/vlan_netlink.c
+@@ -66,7 +66,7 @@ static int vlan_validate(struct nlattr *
+ 
+ 	if (data[IFLA_VLAN_ID]) {
+ 		id = nla_get_u16(data[IFLA_VLAN_ID]);
+-		if (id >= VLAN_VID_MASK)
++		if (id > VLAN_VID_MASK)
+ 			return -ERANGE;
+ 	}
+ 	if (data[IFLA_VLAN_FLAGS]) {
+Index: linux-4.4.198/net/bridge/br_mdb.c
+===================================================================
+--- linux-4.4.198.orig/net/bridge/br_mdb.c
++++ linux-4.4.198/net/bridge/br_mdb.c
+@@ -333,7 +333,7 @@ static bool is_valid_mdb_entry(struct br
+ 		return false;
+ 	if (entry->state != MDB_PERMANENT && entry->state != MDB_TEMPORARY)
+ 		return false;
+-	if (entry->vid >= VLAN_VID_MASK)
++	if (entry->vid > VLAN_VID_MASK)
+ 		return false;
+ 
+ 	return true;
+Index: linux-4.4.198/net/bridge/br_netlink.c
+===================================================================
+--- linux-4.4.198.orig/net/bridge/br_netlink.c
++++ linux-4.4.198/net/bridge/br_netlink.c
+@@ -523,7 +523,7 @@ static int br_afspec(struct net_bridge *
+ 		if (nla_len(attr) != sizeof(struct bridge_vlan_info))
+ 			return -EINVAL;
+ 		vinfo = nla_data(attr);
+-		if (!vinfo->vid || vinfo->vid >= VLAN_VID_MASK)
++		if (!vinfo->vid || vinfo->vid > VLAN_VID_MASK)
+ 			return -EINVAL;
+ 		if (vinfo->flags & BRIDGE_VLAN_INFO_RANGE_BEGIN) {
+ 			if (vinfo_start)
+@@ -772,7 +772,7 @@ static int br_validate(struct nlattr *tb
+ 	if (data[IFLA_BR_VLAN_DEFAULT_PVID]) {
+ 		__u16 defpvid = nla_get_u16(data[IFLA_BR_VLAN_DEFAULT_PVID]);
+ 
+-		if (defpvid >= VLAN_VID_MASK)
++		if (defpvid > VLAN_VID_MASK)
+ 			return -EINVAL;
+ 	}
+ #endif
+Index: linux-4.4.198/net/bridge/br_vlan.c
+===================================================================
+--- linux-4.4.198.orig/net/bridge/br_vlan.c
++++ linux-4.4.198/net/bridge/br_vlan.c
+@@ -841,7 +841,7 @@ int br_vlan_set_default_pvid(struct net_
+ 	u16 pvid = val;
+ 	int err = 0;
+ 
+-	if (val >= VLAN_VID_MASK)
++	if (val > VLAN_VID_MASK)
+ 		return -EINVAL;
+ 
+ 	if (!rtnl_trylock())
+Index: linux-4.4.198/net/core/rtnetlink.c
+===================================================================
+--- linux-4.4.198.orig/net/core/rtnetlink.c
++++ linux-4.4.198/net/core/rtnetlink.c
+@@ -2693,7 +2693,7 @@ static int fdb_vid_parse(struct nlattr *
+ 
+ 		vid = nla_get_u16(vlan_attr);
+ 
+-		if (!vid || vid >= VLAN_VID_MASK) {
++		if (!vid || vid > VLAN_VID_MASK) {
+ 			pr_info("PF_BRIDGE: RTM_NEWNEIGH with invalid vlan id %d\n",
+ 				vid);
+ 			return -EINVAL;
+Index: linux-4.4.198/net/sched/act_vlan.c
+===================================================================
+--- linux-4.4.198.orig/net/sched/act_vlan.c
++++ linux-4.4.198/net/sched/act_vlan.c
+@@ -103,7 +103,7 @@ static int tcf_vlan_init(struct net *net
+ 		if (!tb[TCA_VLAN_PUSH_VLAN_ID])
+ 			return -EINVAL;
+ 		push_vid = nla_get_u16(tb[TCA_VLAN_PUSH_VLAN_ID]);
+-		if (push_vid >= VLAN_VID_MASK)
++		if (push_vid > VLAN_VID_MASK)
+ 			return -ERANGE;
+ 
+ 		if (tb[TCA_VLAN_PUSH_VLAN_PROTOCOL]) {
+Index: linux-4.4.198/net/switchdev/switchdev.c
+===================================================================
+--- linux-4.4.198.orig/net/switchdev/switchdev.c
++++ linux-4.4.198/net/switchdev/switchdev.c
+@@ -865,7 +865,7 @@ static int switchdev_port_br_afspec(stru
+ 		if (nla_len(attr) != sizeof(struct bridge_vlan_info))
+ 			return -EINVAL;
+ 		vinfo = nla_data(attr);
+-		if (!vinfo->vid || vinfo->vid >= VLAN_VID_MASK)
++		if (!vinfo->vid || vinfo->vid > VLAN_VID_MASK)
+ 			return -EINVAL;
+ 		vlan.flags = vinfo->flags;
+ 		if (vinfo->flags & BRIDGE_VLAN_INFO_RANGE_BEGIN) {

@@ -1,0 +1,60 @@
+From 985125ebbae87db60597873243a1de8ea24662af Mon Sep 17 00:00:00 2001
+From: hudawei <hudawei@twsh.com>
+Date: Thu, 3 Dec 2020 17:24:22 +0800
+Subject: [PATCH] ext phy init
+
+---
+ drivers/net/ethernet/mediatek/mtk_eth_soc.c | 22 ++++++++++++++++++++-
+ 1 file changed, 21 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/net/ethernet/mediatek/mtk_eth_soc.c b/drivers/net/ethernet/mediatek/mtk_eth_soc.c
+index 7d2d9e04..df8bf6b5 100644
+--- a/drivers/net/ethernet/mediatek/mtk_eth_soc.c
++++ b/drivers/net/ethernet/mediatek/mtk_eth_soc.c
+@@ -24,6 +24,11 @@
+ #include <linux/tcp.h>
+ #include <linux/interrupt.h>
+ #include <linux/mdio.h>
++#include <linux/of_mdio.h>
++#include <linux/of_platform.h>
++#include <linux/of_gpio.h>
++#include <linux/of_net.h>
++#include <linux/of_irq.h>
+ 
+ #include "mtk_eth_soc.h"
+ #include "mtk_eth_dbg.h"
+@@ -2658,8 +2663,10 @@ static int mtk_probe(struct platform_device *pdev)
+ 	eth->hwlro = MTK_HAS_CAPS(eth->soc->caps, MTK_HWLRO);
+ 
+ 	for_each_child_of_node(pdev->dev.of_node, mac_np) {
++		int ext_reset_pin = -1;
++		int ret = -1;
+ 		if (!of_device_is_compatible(mac_np,
+-					     "mediatek,eth-mac"))
++									 "mediatek,eth-mac"))
+ 			continue;
+ 
+ 		if (!of_device_is_available(mac_np))
+@@ -2668,6 +2675,19 @@ static int mtk_probe(struct platform_device *pdev)
+ 		err = mtk_add_mac(eth, mac_np);
+ 		if (err)
+ 			goto err_deinit_hw;
++		ext_reset_pin = of_get_named_gpio(mac_np, "ext-phy-reset-gpios", 0);
++		if (ext_reset_pin >= 0)
++		{
++			dev_info(&pdev->dev, "Ext-phy gpio : %d\n", ext_reset_pin);
++			ret = devm_gpio_request(&pdev->dev, ext_reset_pin, "mt753x-reset");
++			if (!ret)
++			{
++				gpio_direction_output(ext_reset_pin, 0);
++				msleep(300);
++				gpio_set_value(ext_reset_pin, 1);
++				msleep(500);
++			}
++		}
+ 	}
+ 
+ 	if (eth->soc->irq_num > 1) {
+-- 
+2.17.1
+

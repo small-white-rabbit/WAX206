@@ -1,0 +1,80 @@
+# This file is interpreted as shell script.
+# Put your custom iptables rules here, they will
+# be executed with each firewall (re-)start.
+
+# Internal uci firewall chains are flushed and recreated on reload, so
+# put custom rules into the root chains e.g. INPUT or FORWARD or into the
+# special user chains, e.g. input_wan_rule or postrouting_lan_rule.
+
+add_miniupnpd_chain(){
+	WAN_IF=`uci -q get network.wan.ifname`
+
+	iptables -t nat -F MINIUPNPD 1>/dev/null 2>&1
+	iptables -t nat -D PREROUTING -i $WAN_IF -j MINIUPNPD 1>/dev/null 2>&1
+	iptables -t nat -X MINIUPNPD 1>/dev/null 2>&1
+	iptables -t filter -F MINIUPNPD 1>/dev/null 2>&1
+	iptables -t filter -D FORWARD -i  $WAN_IF  ! -o  $WAN_IF  -j MINIUPNPD 1>/dev/null 2>&1
+	iptables -t filter -X MINIUPNPD 1>/dev/null 2>&1
+
+	iptables -t nat -N MINIUPNPD
+	iptables -t nat -A PREROUTING -i $WAN_IF -m comment --comment "!fw_user: user chain for MINIUPNPD" -j MINIUPNPD
+	iptables -t filter -N MINIUPNPD
+	iptables -t filter -A FORWARD -i $WAN_IF ! -o $WAN_IF -m comment --comment "!fw_user: user chain for MINIUPNPD" -j MINIUPNPD
+}
+
+add_miniupnpd_chain
+
+# add firewall rules for openvpn
+add_openvpn_chain(){
+
+	OPENVPN_ENABLE=`uci -q get openvpn.sample_server.enabled`
+	
+	if [ $OPENVPN_ENABLE = "1" ]; then
+
+	WAN_PORT_TUN=`uci -q get openvpn.sample_server.tunport`
+	OPENVPN_PROTO_TUN=`uci -q get openvpn.sample_server.tunproto`
+	
+	WAN_PORT_TAP=`uci -q get openvpn.sample_server.taport`
+	OPENVPN_PROTO_TAP=`uci -q get openvpn.sample_server.taproto`
+
+# for tun	
+	iptables -t nat -A prerouting_wan_rule -p $OPENVPN_PROTO_TUN --dport $WAN_PORT_TUN -j ACCEPT
+	iptables -A input_wan_rule -p $OPENVPN_PROTO_TUN --dport $WAN_PORT_TUN -j ACCEPT
+	
+	iptables -I INPUT -i tun+ -j ACCEPT
+	iptables -I FORWARD -i tun+ -j ACCEPT
+	iptables -I OUTPUT -o tun+ -j ACCEPT
+	iptables -I FORWARD -o tun+ -j ACCEPT
+# for tap
+	iptables -t nat -A prerouting_wan_rule -p $OPENVPN_PROTO_TAP --dport $WAN_PORT_TAP -j ACCEPT
+	iptables -A input_wan_rule -p $OPENVPN_PROTO_TAP --dport $WAN_PORT_TAP -j ACCEPT
+	
+	iptables -I INPUT -i tap+ -j ACCEPT
+	iptables -I FORWARD -i tap+ -j ACCEPT
+	iptables -I OUTPUT -o tap+ -j ACCEPT
+	iptables -I FORWARD -o tap+ -j ACCEPT
+	fi
+}
+
+add_openvpn_chain
+
+
+add_security_chain() {
+	iptables -t filter -N SECURITY
+
+	iptables -t filter -A SECURITY -p tcp --syn -m limit --limit 1/s -j RETURN
+	iptables -t filter -A SECURITY -p tcp --syn -j DROP
+
+	iptables -t filter -A SECURITY -p tcp --tcp-flags SYN,ACK,FIN,RST RST -m limit --limit 1/s -j RETURN
+	iptables -t filter -A SECURITY -p tcp --tcp-flags SYN,ACK,FIN,RST RST -j DROP
+
+	iptables -t filter -A SECURITY -p udp -m limit --limit 5/s -j RETURN
+	iptables -t filter -A SECURITY -p udp -j DROP
+
+	iptables -t filter -A SECURITY -p icmp --icmp-type 8 -m limit --limit 1/s -j RETURN
+	iptables -t filter -A SECURITY -p icmp --icmp-type 8 -j DROP
+
+	iptables -t filter -A SECURITY -j RETURN
+}
+
+add_security_chain

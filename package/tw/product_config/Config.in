@@ -1,0 +1,12 @@
+if PACKAGE_product_config
+config PRODUCT_NTGR_ROUTER_WAX206
+	bool "Netgear Router WAX206"
+	default n
+	depends on PACKAGE_product_config
+
+config PRODUCT_NTGR_ROUTER_WAX202
+	bool "Netgear Router WAX202"
+	default n
+	depends on PACKAGE_product_config
+
+endif #PACKAGE_product_config#

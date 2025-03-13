@@ -1,0 +1,20 @@
+--- a/xl2tpd.c
++++ b/xl2tpd.c
+@@ -827,6 +827,17 @@
+         l2tp_log (LOG_INFO, "%s: maximum retries exceeded.\n", __FUNCTION__);
+         return;
+     }
++
++    //Improve the timeout for redial (1s 2s 4s 8s 16s 32s)
++    if (lac->rtimeout >= 30 )//30s is default value,so let's consider it.
++    {
++        lac->rtimeout = 1;
++    }
++    else
++    {
++        lac->rtimeout = 2 * lac->rtimeout;
++    }
++
+     if (!lac->t)
+     {
+ #ifdef DEGUG_MAGIC

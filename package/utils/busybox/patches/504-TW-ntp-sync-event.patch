@@ -1,0 +1,96 @@
+--- a/networking/ntpd.c
++++ b/networking/ntpd.c
+@@ -240,6 +240,10 @@
+ #define MAX_KEY_NUMBER  65535
+ #define KEYID_SIZE      sizeof(uint32_t)
+ 
++#define NTGR_STEADY_QUERY_INTERVAL   86400    /* steady state query interval for netgear is 24 Hours */
++#define UBUS_NTPD_SYNC_MSG_SYNSUCC_STR "ubus send ntpd_sync_message '{\"messagetype\":\"sysTimeSync\", \"info\":\"\"}'"
++#define UBUS_NTPD_SYNC_MSG_POTSAVE_STR "ubus send ntpd_sync_message '{\"messagetype\":\"sysPotTimeSave\", \"info\":\"\"}'"
++
+ enum {
+ 	NTP_VERSION     = 4,
+ 	NTP_MAXSTRATUM  = 15,
+@@ -340,6 +344,7 @@ typedef struct {
+ 	uint8_t          lastpkt_stratum;
+ 	uint8_t          reachable_bits;
+ 	uint8_t          dns_errors;
++	int              mark_syncd;
+ 	/* when to send new query (if p_fd == -1)
+ 	 * or when receive times out (if p_fd >= 0): */
+ 	double           next_action_time;
+@@ -789,6 +794,7 @@ add_peers(const char *s, key_entry_t *ke
+ 	p = xzalloc(sizeof(*p) + strlen(s));
+ 	strcpy(p->p_hostname, s);
+ 	p->p_fd = -1;
++	p->mark_syncd = 0;
+ 	p->p_xmt_msg.m_status = MODE_CLIENT | (NTP_VERSION << 3);
+ 	p->next_action_time = G.cur_time; /* = set_next(p, 0); */
+ 	reset_peer_stats(p, STEP_THRESHOLD);
+@@ -1443,11 +1449,17 @@ set_new_values(int disc_state, double of
+ 	 * of the last clock filter sample, which must be earlier than
+ 	 * the current time.
+ 	 */
++	int ret = 0;
+ 	VERB4 bb_error_msg("disc_state=%d last update offset=%f recv_time=%f",
+ 			disc_state, offset, recv_time);
+ 	G.discipline_state = disc_state;
+ 	G.last_update_offset = offset;
+ 	G.last_update_recv_time = recv_time;
++	ret = system(UBUS_NTPD_SYNC_MSG_SYNSUCC_STR);
++	if (ret != 0)
++	{
++		bb_error_msg("ntpd send ubus msg sync error ret(%d)", ret);
++	}
+ }
+ /* Return: -1: decrease poll interval, 0: leave as is, 1: increase */
+ static NOINLINE int
+@@ -1524,6 +1536,11 @@ update_local_clock(peer_t *p)
+ 		step_time(offset);
+ 		if (option_mask32 & OPT_q) {
+ 			/* We were only asked to set time once. Done. */
++			int ret = system(UBUS_NTPD_SYNC_MSG_POTSAVE_STR);
++			if (ret != 0)
++			{
++				bb_error_msg("ntpd send ubus msg potsave1 error ret(%d)", ret);
++			}
+ 			exit(0);
+ 		}
+ 
+@@ -1765,6 +1782,16 @@ update_local_clock(peer_t *p)
+ 			(int)tmx.constant
+ 	);
+ 
++	if (G.discipline_state == STATE_SYNC && p->mark_syncd == 0)
++	{
++		int ret = system(UBUS_NTPD_SYNC_MSG_POTSAVE_STR); /* sync successfully */
++		if (ret != 0)
++		{
++			bb_error_msg("ntpd send ubus msg potsave error ret(%d)", ret);
++		}
++		p->mark_syncd = 1;
++	}
++
+ 	return 1; /* "ok to increase poll interval" */
+ }
+ 
+@@ -2070,6 +2097,11 @@ recv_and_process_peer_pkt(peer_t *p)
+ 		interval = BIGOFF_INTERVAL;
+ 	}
+ 
++	if (G.discipline_state == STATE_SYNC)
++	{
++		interval = NTGR_STEADY_QUERY_INTERVAL;
++	}
++
+ 	set_next(p, interval);
+ }
+ 
+@@ -2532,6 +2564,7 @@ int ntpd_main(int argc UNUSED_PARAM, cha
+ 			peer_t *p = (peer_t *) item->data;
+ 
+ 			if (p->next_action_time <= G.cur_time) {
++				p->mark_syncd = 0;
+ 				if (p->p_fd == -1) {
+ 					/* Time to send new req */
+ 					if (--cnt == 0) {

@@ -1,0 +1,24 @@
+Index: firewall-2017-05-27-a4d98aea/defaults.c
+===================================================================
+--- firewall-2017-05-27-a4d98aea.orig/defaults.c
++++ firewall-2017-05-27-a4d98aea/defaults.c
+@@ -28,7 +28,7 @@ static const struct fw3_chain_spec defau
+ 	C(ANY, FILTER, CUSTOM_CHAINS, "output_rule"),
+ 	C(ANY, FILTER, CUSTOM_CHAINS, "forwarding_rule"),
+ 	C(ANY, FILTER, SYN_FLOOD,     "syn_flood"),
+-
++	C(ANY, FILTER, CUSTOM_CHAINS, "remote_manage"),
+ 	C(V4,  NAT,    CUSTOM_CHAINS, "prerouting_rule"),
+ 	C(V4,  NAT,    CUSTOM_CHAINS, "postrouting_rule"),
+ 
+@@ -244,6 +244,10 @@ fw3_print_default_head_rules(struct fw3_
+             fw3_ipt_rule_append(r, "INPUT");
+         }
+ 
++        r = fw3_ipt_rule_new(handle);
++        fw3_ipt_rule_target(r, "remote_manage");
++        fw3_ipt_rule_append(r, "INPUT");
++
+ 		r = fw3_ipt_rule_create(handle, &tcp, NULL, NULL, NULL, NULL);
+ 		fw3_ipt_rule_target(r, "REJECT");
+ 		fw3_ipt_rule_addarg(r, false, "--reject-with", "tcp-reset");

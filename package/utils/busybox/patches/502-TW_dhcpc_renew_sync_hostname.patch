@@ -1,0 +1,61 @@
+--- a/networking/udhcp/dhcpc.c
++++ b/networking/udhcp/dhcpc.c
+@@ -1157,6 +1157,50 @@ static void client_background(void)
+ }
+ #endif
+ 
++static int get_proc_host_name(const char **host_name)
++{
++#define PROC_HOST_NAME_PATH "/proc/sys/kernel/hostname"
++	FILE *fp = NULL;
++	static char buffer[128] = {0,};
++
++	fp = xfopen_for_read(PROC_HOST_NAME_PATH);
++	if (!fp)
++		return -1;
++
++	fgets(buffer, sizeof(buffer), fp);
++	fclose(fp);
++
++	buffer[strlen(buffer) - 1] = '\0';
++	*host_name = buffer;
++	return 0;
++}
++
++static void update_opt_hostname(void)
++{
++	const char *host_name;
++
++	if (0 == get_proc_host_name(&host_name))
++	{
++		int hostlen = 0;
++		struct option_set *existing;
++
++		hostlen = strlen(host_name);
++		existing = udhcp_find_option(client_data.options, DHCP_HOST_NAME);
++		if (!existing)
++		{
++			/* make a new option */
++			uint8_t *p = udhcp_insert_new_option(&client_data.options, DHCP_HOST_NAME, hostlen, 0);
++			memcpy(p + OPT_DATA, host_name, hostlen);
++		}
++		else
++		{
++			existing->data = xrealloc(existing->data, OPT_DATA + 1 + hostlen);
++			memcpy(existing->data + OPT_DATA, host_name, hostlen);
++			existing->data[OPT_LEN] = hostlen;
++		}
++	}
++}
++
+ //usage:#if defined CONFIG_UDHCP_DEBUG && CONFIG_UDHCP_DEBUG >= 1
+ //usage:# define IF_UDHCP_VERBOSE(...) __VA_ARGS__
+ //usage:#else
+@@ -1578,6 +1622,7 @@ int udhcpc_main(int argc UNUSED_PARAM, c
+ 		/* Is it a signal? */
+ 		switch (udhcp_sp_read()) {
+ 		case SIGUSR1:
++			update_opt_hostname();
+ 			if (client_data.state <= REQUESTING)
+ 				/* Initial negotiations in progress, do not disturb */
+ 				break;

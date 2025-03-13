@@ -1,0 +1,114 @@
+--- a/src/openvpn/multi.c
++++ b/src/openvpn/multi.c
+@@ -854,6 +854,78 @@ err:
+     return NULL;
+ }
+ 
++static void multi_print_status_ubus_event(struct multi_context *m)
++{
++    struct hash_iterator hi;
++    struct hash_iterator hii;
++    const struct hash_element *he;
++    char sendBufer[1024] = {0};
++    char listTable[1024] = {0};
++    int len = 0;
++    int len1 = 0;
++    int count = 0;
++    char tableReal[64] = {0};
++    char clientReal[64] = {0};
++    char tunFlag = 0;
++
++    const int dev_type = TUNNEL_TYPE(m->top.c1.tuntap);
++    if (dev_type == DEV_TYPE_TUN)
++    {
++        tunFlag = 1;
++    }
++
++    hash_iterator_init(m->vhash, &hi);
++    while ((he = hash_iterator_next(&hi)))
++    {
++        struct gc_arena gc = gc_new();
++        const struct multi_route *route = (struct multi_route *) he->value;
++
++        if (multi_route_defined(m, route))
++        {
++            const struct multi_instance *mi = route->instance;
++            const struct mroute_addr *ma = &route->addr;
++
++            memset(tableReal, 0, sizeof(tableReal));
++            strncpynt(tableReal,  mroute_addr_print(&mi->real, &gc), sizeof(tableReal) - 1);
++            hash_iterator_init(m->hash, &hii);
++            while ((he = hash_iterator_next(&hii)))
++            {
++                const struct multi_instance *mii = (struct multi_instance *) he->value;
++                if (!mi->halt)
++                {
++                    memset(clientReal, 0, sizeof(clientReal));
++                    strncpynt(clientReal, mroute_addr_print(&mii->real, &gc), sizeof(clientReal) - 1);
++                    if (strcmp(clientReal, tableReal) == 0)
++                    {
++                        len1 += snprintf(listTable + len1, sizeof(listTable), "%s %s %s %d %ld\n", 
++                                 tls_common_name(mii->context.c2.tls_multi, false), 
++                                 print_in_addr_t(ntohl(mii->real.v4.addr), IA_EMPTY_IF_UNDEF, &gc),
++                                 mroute_addr_print(ma, &gc),
++                                 mii->created,
++                                 (int)difftime(now, mii->created)
++                                 );
++                        count++;
++                        break;
++                    }
++                }
++            }
++            hash_iterator_free(&hii);
++        }
++        gc_free(&gc);
++    }
++    hash_iterator_free(&hi);
++
++    if (tunFlag == 1)
++    {
++        len = snprintf(sendBufer, sizeof(sendBufer), "echo \'%s\' > /tmp/openvpntun.test", listTable);
++        system(sendBufer);
++    }
++    else
++    {
++        len = snprintf(sendBufer, sizeof(sendBufer), "echo \'%s\' > /tmp/openvpntap.test", listTable);
++        system(sendBufer);
++    }
++}
+ /*
+  * Dump tables -- triggered by SIGUSR2.
+  * If status file is defined, write to file.
+@@ -886,12 +958,13 @@ multi_print_status(struct multi_context
+ 
+                 if (!mi->halt)
+                 {
+-                    status_printf(so, "%s,%s," counter_format "," counter_format ",%s",
++                    status_printf(so, "CLIENT_LIST %s,%s," counter_format "," counter_format ",%s-%d",
+                                   tls_common_name(mi->context.c2.tls_multi, false),
+                                   mroute_addr_print(&mi->real, &gc),
+                                   mi->context.c2.link_read_bytes,
+                                   mi->context.c2.link_write_bytes,
+-                                  time_string(mi->created, 0, false, &gc));
++                                  time_string(mi->created, 0, false, &gc),
++                                  (int)difftime(now, mi->created));
+                 }
+                 gc_free(&gc);
+             }
+@@ -915,7 +988,7 @@ multi_print_status(struct multi_context
+                     {
+                         flags[0] = 'C';
+                     }
+-                    status_printf(so, "%s%s,%s,%s,%s",
++                    status_printf(so, "ROUTING_TABLE %s%s,%s,%s,%s",
+                                   mroute_addr_print(ma, &gc),
+                                   flags,
+                                   tls_common_name(mi->context.c2.tls_multi, false),
+@@ -1049,6 +1122,7 @@ multi_print_status(struct multi_context
+ 
+         status_flush(so);
+         gc_free(&gc_top);
++        multi_print_status_ubus_event(m);
+     }
+ 
+ #ifdef ENABLE_ASYNC_PUSH

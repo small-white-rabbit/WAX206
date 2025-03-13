@@ -1,0 +1,19 @@
+--- a/easy-rsa/2.0/vars
++++ b/easy-rsa/2.0/vars
+@@ -62,11 +62,11 @@ export KEY_EXPIRE=3650
+ # which will be placed in the certificate.
+ # Don't leave any of these fields blank.
+ export KEY_COUNTRY="US"
+-export KEY_PROVINCE="CA"
+-export KEY_CITY="SanFrancisco"
+-export KEY_ORG="Fort-Funston"
+-export KEY_EMAIL="me@myhost.mydomain"
+-export KEY_OU="MyOrganizationalUnit"
++export KEY_PROVINCE="California"
++export KEY_CITY="San Jose"
++export KEY_ORG="Netgear"
++export KEY_EMAIL="support@netgear.com"
++export KEY_OU="Netgear"
+ 
+ # X509 Subject Field
+ export KEY_NAME="EasyRSA"

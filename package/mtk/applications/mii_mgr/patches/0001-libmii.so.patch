@@ -1,0 +1,198 @@
+From 620a92dc932cf12a986005acd1e3182a92b6a5a7 Mon Sep 17 00:00:00 2001
+From: hudawei <hudawei@twsh.com>
+Date: Wed, 9 Dec 2020 17:15:07 +0800
+Subject: [PATCH] libmii.so
+
+---
+ Makefile |   7 ++-
+ mii.c    | 135 +++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ mii.h    |   9 ++++
+ 3 files changed, 149 insertions(+), 2 deletions(-)
+ create mode 100644 mii.c
+ create mode 100644 mii.h
+
+diff --git a/Makefile b/Makefile
+index e5cfd1c..5632cd7 100644
+--- a/Makefile
++++ b/Makefile
+@@ -1,6 +1,6 @@
+-EXEC = mii_mgr mii_mgr_cl45
++EXEC = mii_mgr mii_mgr_cl45 libmii.so
+ 
+-CFLAGS += -Wall -Werror
++CFLAGS += -Wall -Werror -fPIC
+ 
+ ifneq ($(CONFIG_SUPPORT_OPENWRT), y)
+ ifeq ($(CONFIG_GLIBC_2_20),y)
+@@ -23,9 +23,12 @@ mii_mgr: mii_mgr.o
+ mii_mgr_cl45: mii_mgr_cl45.o
+ 	$(CC) $(LDFLAGS) -o $@ $^
+ 
++libmii.so: mii.o
++	$(CC) $(LDFLAGS) -shared -o $@ $^
+ romfs:
+ 	$(ROMFSINST) /bin/mii_mgr
+ 	$(ROMFSINST) /bin/mii_mgr_cl45
++	$(ROMFSINST) /lib/libmii.so
+ 
+ clean:
+ 	-rm -f $(EXEC) *.elf *.gdb *.o
+diff --git a/mii.c b/mii.c
+new file mode 100644
+index 0000000..dc913d1
+--- /dev/null
++++ b/mii.c
+@@ -0,0 +1,135 @@
++#include <getopt.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <sys/ioctl.h>
++#include <sys/socket.h>
++#include <sys/types.h>
++#include <linux/if.h>
++#include <linux/mii.h>
++#include <linux/types.h>
++#include <unistd.h>
++#include "ra_ioctl.h"
++
++static int soc_mii_gen_sk(struct ra_mii_ioctl_data *mii, unsigned int phyad, unsigned int devad, unsigned int reg_addr, unsigned int val)
++{
++    int sk = -1;
++
++    memset(mii, 0, sizeof(*mii));
++    sk = socket(AF_INET, SOCK_DGRAM, 0);
++    if (sk < 0)
++    {
++        return sk;
++    }
++
++    if (devad >= 0)
++    {
++        mii->port_num = phyad;
++        mii->dev_addr = devad;
++        mii->reg_addr = reg_addr;
++    }
++    else
++    {
++        mii->phy_id = phyad;
++        mii->reg_num = reg_addr;
++    }
++
++    if (val >= 0)
++    {
++        mii->val_in = val;
++    }
++
++    return sk;
++}
++
++unsigned int soc_mii_read(unsigned int phyad, unsigned int reg_addr)
++{
++    struct ifreq ifr;
++    struct ra_mii_ioctl_data mii;
++    int sk, ret = 0;
++    sk = soc_mii_gen_sk(&mii, phyad, -1, reg_addr, -1);
++    if (sk < 0)
++    {
++        printf("Open socket failed\n");
++        return sk;
++    }
++    ifr.ifr_data = &mii;
++    strncpy(ifr.ifr_name, "eth0", 5);
++    ret = ioctl(sk, RAETH_MII_READ, &ifr);
++    if (ret < 0)
++    {
++        printf("mii_mgr_cl45: ioctl error\n");
++    }
++    close(sk);
++
++    return mii.val_out;
++}
++
++unsigned int soc_mii_write(unsigned int phyad, unsigned int reg_addr, unsigned int val)
++{
++    struct ifreq ifr;
++    struct ra_mii_ioctl_data mii;
++    int sk, ret = 0;
++    sk = soc_mii_gen_sk(&mii, phyad, -1, reg_addr, val);
++    if (sk < 0)
++    {
++        printf("Open socket failed\n");
++        return sk;
++    }
++    ifr.ifr_data = &mii;
++    strncpy(ifr.ifr_name, "eth0", 5);
++    ret = ioctl(sk, RAETH_MII_READ, &ifr);
++    if (ret < 0)
++    {
++        printf("mii_mgr_cl45: ioctl error\n");
++    }
++    close(sk);
++
++    return 0;
++}
++
++unsigned int soc_mii_c45_read(unsigned int phyad, unsigned int devad, unsigned int reg_addr)
++{
++    struct ifreq ifr;
++    struct ra_mii_ioctl_data mii;
++    int sk, ret = 0;
++    sk = soc_mii_gen_sk(&mii, phyad, devad, reg_addr, -1);
++    if (sk < 0)
++    {
++        printf("Open socket failed\n");
++        return sk;
++    }
++    ifr.ifr_data = &mii;
++    strncpy(ifr.ifr_name, "eth0", 5);
++    ret = ioctl(sk, RAETH_MII_READ_CL45, &ifr);
++    if (ret < 0)
++    {
++        printf("mii_mgr_cl45: ioctl error\n");
++    }
++    close(sk);
++
++    return mii.val_out;
++}
++
++unsigned int soc_mii_c45_write(unsigned int phyad, unsigned int devad, unsigned int reg_addr, unsigned int data)
++{
++    struct ifreq ifr;
++    struct ra_mii_ioctl_data mii;
++    int sk, ret = 0;
++    sk = soc_mii_gen_sk(&mii, phyad, devad, reg_addr, data);
++    if (sk < 0)
++    {
++        printf("Open socket failed\n");
++        return sk;
++    }
++    ifr.ifr_data = &mii;
++    strncpy(ifr.ifr_name, "eth0", 5);
++    ret = ioctl(sk, RAETH_MII_WRITE_CL45, &ifr);
++    if (ret < 0)
++    {
++        printf("mii_mgr_cl45: ioctl error\n");
++    }
++    close(sk);
++
++    return 0;
++}
+diff --git a/mii.h b/mii.h
+new file mode 100644
+index 0000000..6af6d52
+--- /dev/null
++++ b/mii.h
+@@ -0,0 +1,9 @@
++#ifndef __MII_H__
++#define __MII_H__
++
++unsigned int soc_mii_read(unsigned int phyad, unsigned int reg_addr);
++unsigned int soc_mii_write(unsigned int phyad, unsigned int reg_addr, unsigned int val);
++unsigned int soc_mii_c45_read(unsigned int phyad, unsigned int devad, unsigned int reg_addr);
++unsigned int soc_mii_c45_write(unsigned int phyad, unsigned int devad, unsigned int reg_addr, unsigned int data);
++
++#endif
+-- 
+2.17.1
+

@@ -1,0 +1,48 @@
+--- a/drivers/mtd/mtdoops.c
++++ b/drivers/mtd/mtdoops.c
+@@ -32,12 +32,13 @@
+ #include <linux/interrupt.h>
+ #include <linux/mtd/mtd.h>
+ #include <linux/kmsg_dump.h>
++#include <linux/time.h>
+ 
+ /* Maximum MTD partition size */
+ #define MTDOOPS_MAX_MTD_SIZE (8 * 1024 * 1024)
+ 
+ #define MTDOOPS_KERNMSG_MAGIC 0x5d005d00
+-#define MTDOOPS_HEADER_SIZE   8
++#define MTDOOPS_HEADER_SIZE   12
+ 
+ static unsigned long record_size = 4096;
+ module_param(record_size, ulong, 0400);
+@@ -218,8 +219,9 @@
+ 	hdr = cxt->oops_buf;
+ 	hdr[0] = cxt->nextcount;
+ 	hdr[1] = MTDOOPS_KERNMSG_MAGIC;
++	hdr[2] = (u32)get_seconds();
+ 
+-	if (panic) {
++	if (0 /*panic*/) {
+ 		ret = mtd_panic_write(mtd, cxt->nextpage * record_size,
+ 				      record_size, &retlen, cxt->oops_buf);
+ 		if (ret == -EOPNOTSUPP) {
+@@ -251,7 +253,7 @@
+ {
+ 	struct mtd_info *mtd = cxt->mtd;
+ 	int ret, page, maxpos = 0;
+-	u32 count[2], maxcount = 0xffffffff;
++	u32 count[3], maxcount = 0xffffffff;
+ 	size_t retlen;
+ 
+ 	for (page = 0; page < cxt->oops_pages; page++) {
+--- a/arch/arm64/boot/dts/mediatek/mt7622-mt7531-ax3200-gmac1-wax206.dts
++++ b/arch/arm64/boot/dts/mediatek/mt7622-mt7531-ax3200-gmac1-wax206.dts
+@@ -23,7 +23,7 @@
+ 
+ 	chosen {
+ 		bootargs = "console=ttyS0,115200n1 loglevel=8 swiotlb=512 \
+-				rootfstype=squashfs";
++				rootfstype=squashfs mtdoops.mtddev=LOG mtdoops.record_size=16384";
+ 	};
+ 
+ 	gpio-keys {

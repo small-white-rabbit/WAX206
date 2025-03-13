@@ -1,0 +1,70 @@
+#
+# Copyright (C) 2009 OpenWrt.org
+#
+
+. /lib/ramips.sh
+
+preinit_default_uci_init() {
+
+	#US disable DFS Channel
+	local country=$(envctl factory get region 2> /dev/null)
+	if [ "$country" = "US" -o "$country" = "NA" ]; then
+		local channel_5g=$(uci -q get wireless.5g.channel | awk '{print int($0)}' 2> dev/null)
+		if [ $channel_5g -ge 52 -a $channel_5g -le 144 ]; then
+			uci -q set "wireless.5g.channel=153"
+			uci commit wireless
+			uci2dat
+		fi
+	fi
+	
+	#run  dos script
+	local dosenable=$(uci -q get firewall.@defaults[0].syn_flood 2> /dev/null)
+	if [ "$dosenable" = "1" ]; then
+		local runscript=$(uci -q get firewall.DosAttack 2> /dev/null)
+		if [ "x$runscript" = "x" ]; then
+			uci set firewall.DosAttack=include
+			uci set firewall.DosAttack.type=script
+			uci set firewall.DosAttack.path=/sbin/security_ddos.sh
+			uci set firewall.DosAttack.family=any
+			uci set firewall.DosAttack.reload=1
+			uci commit firewall
+		fi
+	fi
+
+	#set ip6ifaceid
+	local ip6ifaceid_mode=$(uci -q get network.lan.ip6ifaceid_mode 2> /dev/null)
+	if [ "$ip6ifaceid_mode" = "static" -o "x$ip6ifaceid_mode" = "x" ]; then
+		uci set network.lan.ip6ifaceid=eui64
+	fi
+
+	#set DMZ
+	local dmz=$(uci -q get firewall.dmz 2> /dev/null)
+	local portforwarding=$(uci -q get firewall.portforwarding 2> /dev/null)
+	if [ "x$dmz" != "x" ];then
+		if [ "$dmz" = "redirect" ];then
+			uci set firewall.dmz=dmz
+			uci set firewall.dmzudp=dmzudp
+			uci commit firewall
+		fi
+
+		if [ "x$portforwarding" = "x" ];then
+			uci set firewall.portforwarding=include
+			uci set firewall.portforwarding.type=script
+			uci set firewall.portforwarding.path=/sbin/init_portforward.sh
+			uci set firewall.portforwarding.family=any
+			uci set firewall.portforwarding.reload=1
+			uci commit firewall
+		fi
+	fi
+
+	#change igmpproxy to omcproxy
+	local igmpproxy_enabled=$(uci -q get igmpproxy.enabled 2> /dev/null)
+	if [ "$igmpproxy_enabled" = "1" ]; then
+	       uci set igmpproxy.enabled=0
+	       uci set omcproxy.enabled=1
+	       uci commit igmpproxy
+	       uci commit omcproxy
+	fi
+}
+
+ boot_hook_add preinit_main preinit_default_uci_init

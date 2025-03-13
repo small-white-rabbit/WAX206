@@ -1,0 +1,18 @@
+--- a/vlan.c
++++ b/vlan.c
+@@ -63,11 +63,12 @@ static int vlan_set_device_state(struct
+ 
+ static void vlan_dev_set_name(struct vlan_device *vldev, struct device *dev)
+ {
+-	char name[IFNAMSIZ];
++	char *name;
+ 
++	name = alloca(strlen(dev->ifname) + sizeof(".2147483647\0"));
+ 	vldev->dev.hidden = dev->hidden;
+-	snprintf(name, IFNAMSIZ, "%s.%d", dev->ifname, vldev->id);
+-	device_set_ifname(&vldev->dev, name);
++	sprintf(name, "%s.%d", dev->ifname, vldev->id);
++	device_set_ifname(&vldev->dev, name);
+ }
+ 
+ static void vlan_dev_cb(struct device_user *dep, enum device_event ev)

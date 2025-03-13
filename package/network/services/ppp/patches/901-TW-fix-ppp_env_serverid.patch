@@ -1,0 +1,20 @@
+--- a/pppd/plugins/pppoe/discovery.c	2020-12-24 19:49:09.858108300 +0800
++++ b/pppd/plugins/pppoe/discovery.c	2020-12-24 20:02:08.838047000 +0800
+@@ -533,6 +533,7 @@ waitForPADS(PPPoEConnection *conn, int t
+ 
+     PPPoEPacket packet;
+     int len;
++    char server_id[16] = {0,};
+ 
+     if (gettimeofday(&expire_at, NULL) < 0) {
+ 	error("gettimeofday (waitForPADS): %m");
+@@ -597,6 +598,9 @@ waitForPADS(PPPoEConnection *conn, int t
+     /* Don't bother with ntohs; we'll just end up converting it back... */
+     conn->session = packet.session;
+ 
++    sprintf(server_id, "%d", (int) ntohs(conn->session));
++    script_setenv("SERVERID", server_id, 0);
++
+     info("PPP session is %d", (int) ntohs(conn->session));
+ 
+     /* RFC 2516 says session id MUST NOT be zero or 0xFFFF */

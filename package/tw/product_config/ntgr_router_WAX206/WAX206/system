@@ -1,0 +1,60 @@
+
+config system
+	option hostname 'WAX206'
+	option timezone 'GMT0'
+	option zonename 'GMT0'
+	option ttylogin '1'
+	option log_size '256'
+	option urandom_seed '0'
+	option softVersion 'V1.0.4.0'
+	option passwdRecoveryEnable '1'
+	option disableTelnet '1'
+	option disableDebugBootUp '1'
+	option netmode 'router'
+
+config timeserver 'ntp'
+	option enabled '1'
+	option enable_server '0'
+	option period '120'
+	option server_type '0'
+	option tz_mode '1'
+	option tz_idx '18'
+	option dst_enable '0'
+	list server 'time-g.netgear.com'
+	list server 'time-h.netgear.com'
+
+config led
+	option name 'power'
+	option board 'wax206'
+	option colour 'mixed'
+	option power_ctl '2'
+
+config led
+	option name 'net'
+	option board 'wax206'
+	option colour 'mixed'
+	option power_ctl '2'
+
+config led
+	option name 'wifin'
+	option board 'wax206'
+	option colour 'mixed'
+	option power_ctl '2'
+
+config led
+	option name 'wifia'
+	option board 'wax206'
+	option colour 'mixed'
+	option power_ctl '2'
+
+config netgear 'logs'
+	option log_site_allowed '1'
+	option log_site_block '1'
+	option log_login_web '1'
+	option log_router_op '1'
+	option log_dos '1'
+	option log_port '1'
+	option log_wire_conn '1'
+	option log_wire_sche '1'
+	option log_vpn '1'
+	option log_service_block '1'

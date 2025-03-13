@@ -1,0 +1,218 @@
+Index: switch/switch_fun.c
+===================================================================
+--- switch.orig/switch_fun.c
++++ switch/switch_fun.c
+@@ -2108,27 +2108,40 @@ void igmp_on(int argc, char *argv[])
+ 	if (argc > 4)
+ 		wan_num = strtoul(argv[4], NULL, 10);
+ 
+-	if (leaky_en == 1) {
+-		if (wan_num == 4) {
+-			/* reg_write(0x2410, 0x810000c8); */
+-			reg_read(0x2410, &value);
+-			reg_write(0x2410, value | (1 << 3));
+-			/* reg_write(0x2010, 0x810000c0); */
+-			reg_read(0x2010, &value);
+-			reg_write(0x2010, value & (~(1 << 3)));
+-			reg_write(REG_ISC_ADDR, 0x10027d10);
+-		} else {
+-			/* reg_write(0x2010, 0x810000c8); */
+-			reg_read(0x2010, &value);
+-			reg_write(0x2010, value | (1 << 3));
+-			/* reg_write(0x2410, 0x810000c0); */
+-			reg_read(0x2410, &value);
+-			reg_write(0x2410, value & (~(1 << 3)));
+-			reg_write(REG_ISC_ADDR, 0x01027d01);
+-		}
+-	}
+-	else
+-		reg_write(REG_ISC_ADDR, 0x10027d60);
++	if (leaky_en == 1) 
++    {
++        if (wan_num == 4) 
++        {
++            /* reg_write(0x2410, 0x810000c8); */
++            reg_read(0x2410, &value);
++            reg_write(0x2410, value | (1 << 3));
++            /* reg_write(0x2010, 0x810000c0); */
++            reg_read(0x2010, &value);
++            reg_write(0x2010, value & (~(1 << 3)));
++            reg_write(REG_ISC_ADDR, 0x10027d10);
++        } 
++        else if (wan_num == 0)
++        {
++            /* reg_write(0x2010, 0x810000c8); */
++            reg_read(0x2010, &value);
++            reg_write(0x2010, value | (1 << 3));
++            /* reg_write(0x2410, 0x810000c0); */
++            reg_read(0x2410, &value);
++            reg_write(0x2410, value & (~(1 << 3)));
++            reg_write(REG_ISC_ADDR, 0x01027d01);
++        }
++        else if (wan_num == 5)
++        {
++            /* reg_write(0x2010, 0x810000c8); */
++            reg_read(0x2510, &value);
++            reg_write(0x2510, value | (1 << 3));
++            reg_write(REG_ISC_ADDR, 0x01027d01);
++        }
++    }
++    else
++    {
++        reg_write(REG_ISC_ADDR, 0x10027d60);
++    }
+ 
+ 	reg_write(0x1c, 0x08100810);
+ 	reg_write(0x2008, 0xb3ff);
+@@ -2148,16 +2161,33 @@ void igmp_on(int argc, char *argv[])
+ 
+ 	/*IGMP query only p4 -> p5*/
+ 	reg_write(0x94, 0x00ff0002);
+-	if (wan_num == 4)
+-		reg_write(0x98, 0x000a1008);
+-	else
+-		reg_write(0x98, 0x000a0108);
++    if (wan_num == 4)
++    {   
++        reg_write(0x98, 0x000a1008);
++    }
++    else if (wan_num == 0)
++    {   
++        reg_write(0x98, 0x000a0108);
++    }
++    else if (wan_num == 5)
++    {
++        reg_write(0x98, 0x000a2008);
++    }
+ 	reg_write(0x90, 0x80005000);
+ 	reg_write(0x94, 0xff001100);
+-	if (wan_num == 4)
+-		reg_write(0x98, 0x000B1000);
+-	else
+-		reg_write(0x98, 0x000B0100);
++    if (wan_num == 4)
++    {   
++        reg_write(0x98, 0x000B1000);
++    }
++    else if (wan_num == 0)
++    {   
++        reg_write(0x98, 0x000B0100);
++    }
++    else if (wan_num == 5)
++    {
++        reg_write(0x98, 0x000B2000);
++    }
++    
+ 	reg_write(0x90, 0x80005001);
+ 	reg_write(0x94, 0x3);
+ 	reg_write(0x98, 0x0);
+@@ -2173,19 +2203,35 @@ void igmp_on(int argc, char *argv[])
+ 	reg_write(0x94, 0x4);
+ 	reg_write(0x98, 0x0);
+ 	reg_write(0x90, 0x80009001);
+-	if (wan_num == 4)
+-		reg_write(0x94, 0x1a001080);
+-	else
+-		reg_write(0x94, 0x1a000180);
++    if (wan_num == 4)
++    {   
++        reg_write(0x94, 0x1a001080);
++    }
++    else if (wan_num == 0)
++    {   
++        reg_write(0x94, 0x1a000180);
++    }
++    else if (wan_num == 5)
++    {
++        reg_write(0x94, 0x1a002080);
++    }
+ 	reg_write(0x98, 0x0);
+ 	reg_write(0x90, 0x8000b001);
+ 
+ 	/*IGMP p0~p3 -> p6*/
+ 	reg_write(0x94, 0x00ff0002);
+-	if (wan_num == 4)
+-		reg_write(0x98, 0x000a0f08);
+-	else
++    if (wan_num == 4)
++    {   
++        reg_write(0x98, 0x000a0f08);
++    }
++	else if (wan_num == 0)
++    {   
+ 		reg_write(0x98, 0x000a1e08);
++    }
++    else if (wan_num == 5)
++    {
++       reg_write(0x98, 0x000a1f08);
++    }
+ 	reg_write(0x90, 0x80005003);
+ 	reg_write(0x94, 0x8);
+ 	reg_write(0x98, 0x0);
+@@ -2204,16 +2250,26 @@ void igmp_on(int argc, char *argv[])
+ 	reg_write(0x94, 0x30);
+ 	reg_write(0x98, 0x0);
+ 	reg_write(0x90, 0x80009003);
+-	if (wan_num == 4)
+-		reg_write(0x94, 0x1a000f80);
+-	else
+-		reg_write(0x94, 0x1a001e80);
++    if (wan_num == 4)
++    {
++        reg_write(0x94, 0x1a000f80);
++    }
++    else if (wan_num == 0)
++    {
++        reg_write(0x94, 0x1a001e80);
++    }
++    else if (wan_num == 5)
++    {
++        reg_write(0x94, 0x1a001f80);
++    }
+ 	reg_write(0x98, 0x0);
+ 	reg_write(0x90, 0x8000b003);
+ 
+ 	/*Force eth2 to receive all igmp packets*/
+-	sprintf(cmd,"echo 2 > /sys/devices/virtual/net/%s/brif/%s/multicast_router",BR_DEVNAME,ETH_DEVNAME);
++	sprintf(cmd,"echo 2 > /sys/devices/virtual/net/%s/brif/%s.0/multicast_router",BR_DEVNAME,ETH_DEVNAME);
+ 	system(cmd);
++
++    printf("config switch fun igmpsnoop on.\n");
+ }
+ 
+ void igmp_disable(int argc, char *argv[])
+@@ -2263,19 +2319,21 @@ void igmp_enable(int argc, char *argv[])
+ 
+ void igmp_off()
+ {
+-	unsigned int value;
+-	//set ISC: IGMP Snooping Control Register (offset: 0x0018)
+-	reg_read(REG_ISC_ADDR, &value);
+-	value &= ~(1 << 18); //disable
+-	reg_write(REG_ISC_ADDR, value);
+-
+-	/*restore wan port multicast leaky vlan function: default disabled*/
+-	reg_read(0x2010, &value);
+-	reg_write(0x2010, value & (~(1 << 3)));
+-	reg_read(0x2410, &value);
+-	reg_write(0x2410, value & (~(1 << 3)));
+-
+-	printf("config igmpsnoop off.\n");
++    unsigned int value;
++    //set ISC: IGMP Snooping Control Register (offset: 0x0018)
++    reg_read(REG_ISC_ADDR, &value);
++    value &= ~(1 << 18); //disable
++    reg_write(REG_ISC_ADDR, value);
++
++    /*restore wan port multicast leaky vlan function: default disabled*/
++    reg_read(0x2010, &value);
++    reg_write(0x2010, value & (~(1 << 3)));
++    reg_read(0x2410, &value);
++    reg_write(0x2410, value & (~(1 << 3)));
++    reg_read(0x2510, &value);
++    reg_write(0x2510, value & (~(1 << 3)));
++
++    printf("config igmpsnoop off.\n");
+ }
+ 
+ void switch_reset(int argc, char *argv[])

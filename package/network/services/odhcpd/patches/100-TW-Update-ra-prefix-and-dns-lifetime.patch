@@ -1,0 +1,53 @@
+Index: odhcpd-2020-05-03-49e4949c/src/router.c
+===================================================================
+--- odhcpd-2020-05-03-49e4949c.orig/src/router.c
++++ odhcpd-2020-05-03-49e4949c/src/router.c
+@@ -562,7 +562,27 @@ static int send_router_advert(struct int
+ 
+ 		if (!IN6_IS_ADDR_ULA(&addr->addr.in6) || iface->default_router)
+ 			valid_prefix = true;
+-
++		/* If ipv6 proto is static, the preferred lifetime is 1800 and valid lifetime is 2400
++		   This is the requirement from netgear spec */
++		{  /* Add by minchangchun start */
++			FILE *fp = NULL;
++			char proto[32] = {0};
++
++			fp = popen("uci get network.wan6.proto 2>/dev/null", "r");
++			if (fp != NULL)
++			{
++				if (fgets(proto, sizeof(proto), fp))
++				{
++					if (strstr(proto, "static"))
++					{
++						preferred = 1800;
++						valid = 2400;
++					}
++				}
++				pclose(fp);
++			}
++		}
++		/* Add by minchangchun end */
+ 		odhcpd_bmemcpy(&p->nd_opt_pi_prefix, &addr->addr.in6,
+ 				(iface->ra_advrouter) ? 128 : addr->prefix);
+ 		p->nd_opt_pi_type = ND_OPT_PREFIX_INFORMATION;
+@@ -622,7 +642,8 @@ static int send_router_advert(struct int
+ 			memset(dns, 0, dns_sz);
+ 			dns->type = ND_OPT_RECURSIVE_DNS;
+ 			dns->len = 1 + (2 * dns_cnt);
+-			dns->lifetime = htonl(lifetime);
++			//dns->lifetime = htonl(lifetime);
++			dns->lifetime = htonl(2*maxival); /* the dns recursive dns lifetime is 2*maxival, the netgear spec requirement */
+ 			memcpy(dns->addr, dns_addr, sizeof(struct in6_addr)*dns_cnt);
+ 		}
+ 
+@@ -645,7 +666,8 @@ static int send_router_advert(struct int
+ 			memset(search, 0, search_sz);
+ 			search->type = ND_OPT_DNS_SEARCH;
+ 			search->len = search_len ? ((sizeof(*search) + search_padded) / 8) : 0;
+-			search->lifetime = htonl(lifetime);
++			//search->lifetime = htonl(lifetime);
++			search->lifetime = htonl(2*maxival); /* the dns search list lifetime is 2*maxival, the same as dns recursive dns lifetime */
+ 			memcpy(search->name, search_domain, search_len);
+ 			memset(&search->name[search_len], 0, search_padded - search_len);
+ 		}

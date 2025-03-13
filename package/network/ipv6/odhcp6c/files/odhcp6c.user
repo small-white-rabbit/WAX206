@@ -1,0 +1,52 @@
+#!/bin/sh
+
+device="$1"
+status="$2"
+
+case "status" in
+	bound|updated|rebound)
+		mkdir /var/dhcpv6
+		rm -fr /var/dhcpv6/$device.leases
+
+		for entry in $ADDRESSES; do
+			addr="${entry%%/*}"
+			entry="${entry#*/}"
+			mask="${entry%%,*}"
+			entry="${entry#*,}"
+			preferred="${entry%%,*}"
+			entry="${entry#*,}"
+			valid="${entry%%,*}"
+
+			preferred=`expr $preferred + 10`
+			valid=`expr $valid + 10`
+			echo "$addr $mask $preferred $valid" >> /var/dhcpv6/$device.leases
+		done
+	;;
+esac
+
+case "$status" in
+	bound|informed|updated|ra-updated)
+		newPrefix=
+		[ -n "$PREFIXES$USERPREFIX" ] && newPrefix=1
+		for entry in $ADDRESSES; do
+			addr="${entry%%/*}"
+			entry="${entry#*/}"
+			mask="${entry%%,*}"
+			if [ "$mask" -eq 64 -a -z "$PREFIXES" -a -n "$EXTENDPREFIX" ]; then
+				newPrefix=1
+				break
+			fi
+		done
+		if [ -n $newPrefix ]; then
+			tw_vty -c "switchport 1 admin disable" 2> /dev/null
+			tw_vty -c "switchport 2 admin disable" 2> /dev/null
+			tw_vty -c "switchport 3 admin disable" 2> /dev/null
+			tw_vty -c "switchport 4 admin disable" 2> /dev/null
+			sleep 1
+			tw_vty -c "switchport 1 admin enable" 2> /dev/null
+			tw_vty -c "switchport 2 admin enable" 2> /dev/null
+			tw_vty -c "switchport 3 admin enable" 2> /dev/null
+			tw_vty -c "switchport 4 admin enable" 2> /dev/null
+		fi
+	;;
+esac

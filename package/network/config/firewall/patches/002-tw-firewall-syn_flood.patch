@@ -1,0 +1,48 @@
+--- a/defaults.c
++++ b/defaults.c
+@@ -221,23 +221,28 @@ fw3_print_default_head_rules(struct fw3_ipt_handle *handle,
+ 			}
+ 		}
+ 
+-		if (defs->syn_flood)
+-		{
+-			r = fw3_ipt_rule_create(handle, &tcp, NULL, NULL, NULL, NULL);
+-			fw3_ipt_rule_extra(r, "--syn");
+-			fw3_ipt_rule_limit(r, &defs->syn_flood_rate);
+-			fw3_ipt_rule_target(r, "RETURN");
+-			fw3_ipt_rule_append(r, "syn_flood");
+-
+-			r = fw3_ipt_rule_new(handle);
+-			fw3_ipt_rule_target(r, "DROP");
+-			fw3_ipt_rule_append(r, "syn_flood");
+-
+-			r = fw3_ipt_rule_create(handle, &tcp, NULL, NULL, NULL, NULL);
+-			fw3_ipt_rule_extra(r, "--syn");
+-			fw3_ipt_rule_target(r, "syn_flood");
+-			fw3_ipt_rule_append(r, "INPUT");
+-		}
++        if (defs->syn_flood)
++        {
++#if 0
++            r = fw3_ipt_rule_create(handle, &tcp, NULL, NULL, NULL, NULL);
++            fw3_ipt_rule_extra(r, "--syn");
++            fw3_ipt_rule_limit(r, &defs->syn_flood_rate);
++            fw3_ipt_rule_target(r, "RETURN");
++            fw3_ipt_rule_append(r, "syn_flood");
++
++            r = fw3_ipt_rule_new(handle);
++            fw3_ipt_rule_target(r, "DROP");
++            fw3_ipt_rule_append(r, "syn_flood");
++
++            r = fw3_ipt_rule_new(handle, &tcp, NULL, NULL, NULL, NULL);
++            //fw3_ipt_rule_extra(r, "--syn");
++            fw3_ipt_rule_target(r, "syn_flood");
++            fw3_ipt_rule_append(r, "INPUT");
++#endif
++            r = fw3_ipt_rule_new(handle);
++            fw3_ipt_rule_target(r, "syn_flood");
++            fw3_ipt_rule_append(r, "INPUT");
++        }
+ 
+ 		r = fw3_ipt_rule_create(handle, &tcp, NULL, NULL, NULL, NULL);
+ 		fw3_ipt_rule_target(r, "REJECT");

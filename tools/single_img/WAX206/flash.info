@@ -1,0 +1,7 @@
+#!/bin/sh
+
+# Modify flash name
+FLASH_NAME=2Gb_2K_128
+#FLASH_NAME=2Gb_2K_64
+#FLASH_NAME=1Gb_2K_64
+#FLASH_NAME=W25N01GV

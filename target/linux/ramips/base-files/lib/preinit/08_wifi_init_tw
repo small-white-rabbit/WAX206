@@ -1,0 +1,14 @@
+#
+# Copyright (C) 2009 OpenWrt.org
+#
+
+. /lib/ramips.sh
+
+preinit_wifi_init() {
+
+	local model=`envctl factory get model`
+	echo "model is $model"
+
+}
+
+boot_hook_add preinit_main preinit_wifi_init

@@ -1,0 +1,52 @@
+config system
+	option hostname 'WAX206'
+	option timezone 'UTC'
+	option ttylogin '1'
+	option log_size '64'
+	option urandom_seed '0'
+	option username 'admin'
+	option softVersion 'V1.0.0.0'
+	option disableTelnet '0'
+
+config timeserver 'ntp'
+	option enabled '1'
+	option enable_server '0'
+	option period 30
+	list server '0.lede.pool.ntp.org'
+	list server '1.lede.pool.ntp.org'
+	list server '2.lede.pool.ntp.org'
+
+config led
+	option name 'power'
+	option board 'wax206'
+	option colour 'mixed'
+	option power_ctl '2'
+
+config led
+	option name 'net'
+	option board 'wax206'
+	option colour 'mixed'
+	option power_ctl '2'
+
+config led
+	option name 'wifin'
+	option board 'wax206'
+	option colour 'mixed'
+	option power_ctl '2'
+
+config led
+	option name 'wifia'
+	option board 'wax206'
+	option colour 'mixed'
+	option power_ctl '2'
+
+config netgear 'logs'
+	option log_site_allowed '1'
+	option log_site_block '1'
+	option log_login_web '1'
+	option log_router_op '1'
+	option log_dos '1'
+	option log_port '1'
+	option log_wire_conn '1'
+	option log_wire_sche '1'
+	option log_vpn '1'

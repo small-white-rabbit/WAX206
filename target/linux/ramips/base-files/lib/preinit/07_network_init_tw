@@ -1,0 +1,16 @@
+#
+# Copyright (C) 2009 OpenWrt.org
+#
+
+. /lib/ramips.sh
+
+preinit_network_init() {
+	bash -c /sbin/753x.sh
+	local disableTelnet=$(uci get system.@system[0].disableTelnet 2>/dev/null)
+	local factory_mode=`envctl factory get factory_mode`
+	if [ "$factory_mode" != "off" ] || [ "$disableTelnet" != "1" ]; then
+		/etc/init.d/telnet restart
+	fi
+}
+
+boot_hook_add preinit_main preinit_network_init

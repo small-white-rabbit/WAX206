@@ -1,0 +1,32 @@
+From bbcf459b2146b7e01fd8ea16cdde2b888b075037 Mon Sep 17 00:00:00 2001
+From: hudawei <hudawei@twsh.com>
+Date: Thu, 8 Apr 2021 11:19:58 +0800
+Subject: [PATCH] local hnat
+
+---
+ drivers/net/ethernet/mediatek/mtk_hnat/hnat_nf_hook.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/net/ethernet/mediatek/mtk_hnat/hnat_nf_hook.c b/drivers/net/ethernet/mediatek/mtk_hnat/hnat_nf_hook.c
+index 79e966ca..ff8d2f5f 100644
+--- a/drivers/net/ethernet/mediatek/mtk_hnat/hnat_nf_hook.c
++++ b/drivers/net/ethernet/mediatek/mtk_hnat/hnat_nf_hook.c
+@@ -1940,13 +1940,13 @@ static struct nf_hook_ops mtk_hnat_nf_ops[] __read_mostly = {
+ 	{
+ 		.hook = mtk_hnat_br_nf_local_in,
+ 		.pf = NFPROTO_BRIDGE,
+-		.hooknum = NF_BR_LOCAL_IN,
++		.hooknum = NF_BR_PRE_ROUTING,
+ 		.priority = NF_BR_PRI_FIRST,
+ 	},
+ 	{
+ 		.hook = mtk_hnat_br_nf_local_out,
+ 		.pf = NFPROTO_BRIDGE,
+-		.hooknum = NF_BR_LOCAL_OUT,
++		.hooknum = NF_BR_POST_ROUTING,
+ 		.priority = NF_BR_PRI_LAST - 1,
+ 	},
+ 	{
+-- 
+2.17.1
+

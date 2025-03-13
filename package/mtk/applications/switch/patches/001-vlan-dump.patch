@@ -1,0 +1,13 @@
+Index: switch/switch_fun.c
+===================================================================
+--- switch.orig/switch_fun.c
++++ switch/switch_fun.c
+@@ -1864,7 +1864,7 @@ void vlan_dump(int argc, char *argv[])
+ 	else
+ 		printf("  vid  fid  portmap    s-tag\n");
+ 
+-	for (i = 1; i < 4095; i++) {
++	for (i = 0; i <= 4095; i++) {
+ 		//reg_read(REG_VLAN_ID_BASE + 4*i, &vid);
+ 		//value = (0x80000000 + 2*i);  //r_vid_cmd
+ 		value = (0x80000000 + i); //r_vid_cmd

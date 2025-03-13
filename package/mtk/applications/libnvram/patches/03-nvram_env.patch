@@ -1,0 +1,43 @@
+--- a/nvram_env.h	2020-11-27 16:52:02.865190122 +0800
++++ b/nvram_env.h	2020-11-27 17:05:26.248067454 +0800
+@@ -22,6 +22,7 @@
+ 		.max_cache_idx = 0
+ 	},
+ #endif
++#if 0
+ 	{
+ 		.name = FB_2860_BLOCK_NAME,
+ 		.flash_offset =  0x2000,
+@@ -79,5 +80,21 @@
+ #endif
+ #endif
+ 	}
++#else
++	{
++		.name = "FENV",
++		.flash_offset =  0x20000,
++		.flash_max_len = ENV_BLK_SIZE * 8,
++		.valid = 0,
++		.max_cache_idx = 0
++	},
++	{
++		.name = "UENV",
++		.flash_offset =  0x28000,
++		.flash_max_len = ENV_BLK_SIZE * 4,
++		.valid = 0,
++		.max_cache_idx = 0
++	},
++#endif
+ };
+ #endif
+--- a/nvram.h	2020-11-27 17:12:40.705458842 +0800
++++ b/nvram.h	2020-11-27 17:13:00.136871469 +0800
+@@ -81,7 +81,7 @@
+ #define ENV_BLK_SIZE 0x1000
+ 
+ #ifdef CONFIG_DUAL_IMAGE
+-#define ENV_UBOOT_SIZE 0x1000
++#define ENV_UBOOT_SIZE 0x2000
+ #endif
+ 
+ #define MAX_NAME_LEN 128

@@ -1,0 +1,61 @@
+--- a/net/bridge/br_input.c
++++ b/net/bridge/br_input.c
+@@ -636,6 +636,7 @@ static int br_dns_netgearfilter(struct s
+     char *domain = NULL;
+     char maindomain[] ={0x03,'w','w','w'};
+     char netGearDomain[] = {0x0b,'r','o','u','t','e','r','l','o','g','i','n'};
++    char netGearApDomain[] = {0x07,'a','p','l','o','g','i','n'}; //aplogin
+     char netGearDomain3[] = {0x03,'c','o','m','\0'};
+     char netGearDomain4[] = {0x03,'n','e','t','\0'};
+ 
+@@ -713,24 +714,34 @@ static int br_dns_netgearfilter(struct s
+         {
+             domain += sizeof(netGearDomain);
+             len += sizeof(netGearDomain);
++        }
++        else if (strncasecmp(domain, netGearApDomain, sizeof(netGearApDomain)) == 0)
++        {
++            domain += sizeof(netGearApDomain);
++            len += sizeof(netGearApDomain);
++        }
++        else
++        {
++            break;
++        }
+ 
+-			if ((strncasecmp(domain, netGearDomain3, sizeof(netGearDomain3)) == 0) || 
+-				((strncasecmp(domain, netGearDomain4, sizeof(netGearDomain4)) == 0)))
+-			{
+-				domain += strlen(domain) + 1;
+-				len += strlen(domain) + 1;
+-				if ((len + 4 <= queryslen)
+-						&& htons((*(short *) (domain))) == 0x0001
+-						&& (htons(*(short *) (domain + 2))) == 0x0001)
+-				{
+-					return 0;
+-				}
+-				else
+-				{
+-					return 0;
+-				}
+-			}
++        if ((strncasecmp(domain, netGearDomain3, sizeof(netGearDomain3)) == 0) || 
++            ((strncasecmp(domain, netGearDomain4, sizeof(netGearDomain4)) == 0)))
++        {
++            domain += strlen(domain) + 1;
++            len += strlen(domain) + 1;
++            if ((len + 4 <= queryslen)
++                    && htons((*(short *) (domain))) == 0x0001
++                    && (htons(*(short *) (domain + 2))) == 0x0001)
++            {
++                return 0;
++            }
++            else
++            {
++                return 0;
++            }
+         }
++
+         /*only compare the first query TBD*/
+         break;
+     }

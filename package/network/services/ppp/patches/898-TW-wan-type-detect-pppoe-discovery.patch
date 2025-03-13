@@ -1,0 +1,43 @@
+Index: ppp-2.4.9.git-2021-01-04/pppd/plugins/pppoe/discovery.c
+===================================================================
+--- ppp-2.4.9.git-2021-01-04.orig/pppd/plugins/pppoe/discovery.c
++++ ppp-2.4.9.git-2021-01-04/pppd/plugins/pppoe/discovery.c
+@@ -589,6 +589,17 @@ waitForPADS(PPPoEConnection *conn, int t
+ 		return;
+ 	    if (conn->error)
+ 		return;
++		/* TW Add for wan detect */
++		if (0 == access("/tmp/wan_det_pppoe", 0))
++		{
++			FILE *fp = NULL;
++			char str[] = "pppoe";
++
++			fp = fopen("/tmp/wan_det_pppoe", "w+");
++			fwrite(str, sizeof(str) , 1, fp);
++
++			fclose(fp);
++		}
+ 	    conn->discoveryState = STATE_SESSION;
+ 	    break;
+ 	}
+@@ -666,9 +677,16 @@ discovery(PPPoEConnection *conn)
+ 	    lcp_wantoptions[0].mru = ETH_PPPOE_MTU;
+     }
+ 
+-    /* We're done. */
+-    close(conn->discoverySocket);
+-    conn->discoverySocket = -1;
+-    conn->discoveryState = STATE_SESSION;
++    if (0 != access("/tmp/wan_det_pppoe", 0))
++    {
++        /* We're done. */
++        close(conn->discoverySocket);
++        conn->discoverySocket = -1;
++        conn->discoveryState = STATE_SESSION;
++    }
++    else /* TW Add for wan detect */
++    {
++        conn->discoveryState = STATE_TERMINATED;
++    }
+     return;
+ }

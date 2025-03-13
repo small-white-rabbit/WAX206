@@ -1,0 +1,167 @@
+From e069a67c5dd9b8dfd20905523d476e6a44e7445b Mon Sep 17 00:00:00 2001
+From: hudawei <hudawei@twsh.com>
+Date: Fri, 26 Feb 2021 17:09:41 +0800
+Subject: [PATCH] =?UTF-8?q?netifd=E6=B7=BB=E5=8A=A0pbit=E7=9A=84=E6=94=AF?=
+ =?UTF-8?q?=E6=8C=81?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ device.h       |  1 +
+ interface.c    | 14 ++++++++++++++
+ interface.h    |  1 +
+ system-linux.c | 19 ++++++++++++++++++-
+ vlan.c         |  2 ++
+ 5 files changed, 36 insertions(+), 1 deletion(-)
+
+diff --git a/device.h b/device.h
+index 87236d4..2a89bb0 100644
+--- a/device.h
++++ b/device.h
+@@ -219,6 +219,7 @@ struct device {
+ 
+ 	struct device_settings orig_settings;
+ 	struct device_settings settings;
++	unsigned int priority; //802.1P  jiangdingyong modify 20200411
+ };
+ 
+ struct device_hotplug_ops {
+diff --git a/interface.c b/interface.c
+index a014111..3bdf7b5 100644
+--- a/interface.c
++++ b/interface.c
+@@ -46,6 +46,7 @@ enum {
+ 	IFACE_ATTR_DELEGATE,
+ 	IFACE_ATTR_IP6IFACEID,
+ 	IFACE_ATTR_FORCE_LINK,
++	IFACE_ATTR_PRIORITY,    //802.1P  jiangdingyong modify 20200411
+ 	IFACE_ATTR_MAX
+ };
+ 
+@@ -68,6 +69,7 @@ static const struct blobmsg_policy iface_attrs[IFACE_ATTR_MAX] = {
+ 	[IFACE_ATTR_DELEGATE] = { .name = "delegate", .type = BLOBMSG_TYPE_BOOL },
+ 	[IFACE_ATTR_IP6IFACEID] = { .name = "ip6ifaceid", .type = BLOBMSG_TYPE_STRING },
+ 	[IFACE_ATTR_FORCE_LINK] = { .name = "force_link", .type = BLOBMSG_TYPE_BOOL },
++	[IFACE_ATTR_PRIORITY] = { .name = "priority", .type = BLOBMSG_TYPE_INT32 }, //802.1P  jiangdingyong modify 20200411
+ };
+ 
+ const struct uci_blob_param_list interface_attr_list = {
+@@ -883,6 +885,10 @@ static bool __interface_add(struct interface *iface, struct blob_attr *config, b
+ 	} else {
+ 		if ((cur = tb[IFACE_ATTR_IFNAME]))
+ 			iface->ifname = blobmsg_data(cur);
++		//802.1P  jiangdingyong modify 20200411  start
++		if ((cur = tb[IFACE_ATTR_PRIORITY]))
++			iface->priority = blobmsg_get_u32(cur);
++		//802.1P  jiangdingyong modify 20200411  end
+ 	}
+ 
+ 	iface->config = config;
+@@ -949,6 +955,14 @@ interface_set_main_dev(struct interface *iface, struct device *dev)
+ 			return;
+ 	}
+ 
++	//802.1P  jiangdingyong modify 20200411  start
++	//netifd_log_message(L_CRIT, "[jdy][%s][%d] iface->priority=%d \n", __FUNCTION__, __LINE__, iface->priority);
++	if (iface->main_dev.dev)
++	{
++		iface->main_dev.dev->priority = iface->priority;
++	}
++	//802.1P  jiangdingyong modify 20200411  end
++
+ 	if (!iface->l3_dev.dev)
+ 		interface_set_l3_dev(iface, dev);
+ }
+diff --git a/interface.h b/interface.h
+index 7d5b309..c3246ea 100644
+--- a/interface.h
++++ b/interface.h
+@@ -164,6 +164,7 @@ struct interface {
+ 
+ 	struct uloop_timeout remove_timer;
+ 	struct ubus_object ubus;
++	unsigned int priority; //802.1P  jiangdingyong modify 20200411
+ };
+ 
+ 
+diff --git a/system-linux.c b/system-linux.c
+index bdea345..8c2990e 100644
+--- a/system-linux.c
++++ b/system-linux.c
+@@ -1133,6 +1133,7 @@ int system_macvlan_del(struct device *macvlan)
+ 
+ static int system_vlan(struct device *dev, int id)
+ {
++	int rv = 0;
+ 	struct vlan_ioctl_args ifr = {
+ 		.cmd = SET_VLAN_NAME_TYPE_CMD,
+ 		.u.name_type = VLAN_NAME_TYPE_RAW_PLUS_VID_NO_PAD,
+@@ -1148,7 +1149,23 @@ static int system_vlan(struct device *dev, int id)
+ 		ifr.u.VID = id;
+ 	}
+ 	strncpy(ifr.device1, dev->ifname, sizeof(ifr.device1));
+-	return ioctl(sock_ioctl, SIOCSIFVLAN, &ifr);
++	rv = ioctl(sock_ioctl, SIOCSIFVLAN, &ifr);
++	if (0 == rv && id >= 0 && dev->priority != 0)
++	{
++		int i = 0;
++		for (i = 0; i <= 7; i++)
++		{
++			struct vlan_ioctl_args pr = {
++				.cmd = SET_VLAN_EGRESS_PRIORITY_CMD,
++				.u.skb_priority = i,
++				.vlan_qos = dev->priority,
++			};
++			snprintf(pr.device1, sizeof(pr.device1), "%s.%u", dev->ifname, id);
++			ioctl(sock_ioctl, SIOCSIFVLAN, &pr);
++		}
++	}
++
++	return rv;
+ }
+ 
+ static int mtkhnat_update_ppddev(char *ifname, int id)
+diff --git a/vlan.c b/vlan.c
+index 074b9f9..dbdd0d4 100644
+--- a/vlan.c
++++ b/vlan.c
+@@ -53,6 +53,8 @@ static int vlan_set_device_state(struct device *dev, bool up)
+ 	if (ret < 0)
+ 		return ret;
+ 
++	vldev->dep.dev->priority = dev->priority; //802.1P  jiangdingyong modify 20200411
++
+ 	system_vlan_add(vldev->dep.dev, vldev->id);
+ 	ret = vldev->set_state(dev, true);
+ 	if (ret)
+--- a/bridge.c
++++ b/bridge.c
+@@ -109,6 +109,7 @@
+ 	struct vlist_tree members;
+ 	int n_present;
+ 	int n_failed;
++	unsigned int priority;
+ };
+ 
+ struct bridge_member {
+@@ -455,6 +456,7 @@
+ 	dev = device_get(name, true);
+ 	if (!dev)
+ 		return;
++	dev->priority = bst->priority;
+ 
+ 	bridge_create_member(bst, name, dev, false);
+ }
+@@ -549,6 +551,7 @@
+ 	}
+ 
+ 	bst->n_failed = 0;
++	bst->priority = dev->priority;
+ 	vlist_update(&bst->members);
+ 	if (bst->ifnames) {
+ 		blobmsg_for_each_attr(cur, bst->ifnames, rem) {
+
+-- 
+2.17.1
+

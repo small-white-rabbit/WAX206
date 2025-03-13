@@ -1,0 +1,24 @@
+#!/bin/sh /etc/rc.common
+
+START=10
+STOP=10
+
+start_service() {
+	fwdd -p ra0 apcli0 -p ra1 apcli0 -p ra2 apcli0  \
+-p rai0 apclii0 -p rai1 apclii0 -p rai2 apclii0 \
+-p rax0 apclix0 -p rax1 apclix0 -p rax2 apclix0 \
+-p wlan0 wlan-apcli0 -e eth0 5G&
+}
+
+stop_service() {
+	killall -15 fwdd
+}
+
+start() {
+        start_service $@
+}
+
+
+stop() {
+        stop_service $@
+}

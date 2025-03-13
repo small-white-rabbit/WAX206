@@ -1,0 +1,19 @@
+#!/bin/sh /etc/rc.common
+# Copyright (C) 2006 OpenWrt.org
+
+START=60
+start() {
+	local netmode=""
+	netmode=$(uci get system.@system[0].netmode 2>/dev/null)
+	if [ "x$netmode" = "x" ]; then
+		netmode="router"
+	fi
+	
+	if [ "$netmode" = "router" ]; then
+		/usr/sbin/quagga.init start
+	fi
+}
+
+stop() {
+	/usr/sbin/quagga.init stop
+}

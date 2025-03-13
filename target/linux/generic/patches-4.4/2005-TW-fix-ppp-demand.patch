@@ -1,0 +1,129 @@
+diff --git a/drivers/net/ppp/ppp_generic.c b/drivers/net/ppp/ppp_generic.c
+index 46448d7e..08b29906 100644
+--- a/drivers/net/ppp/ppp_generic.c
++++ b/drivers/net/ppp/ppp_generic.c
+@@ -1276,6 +1276,77 @@ pad_compress_skb(struct ppp *ppp, struct
+ 	return new_skb;
+ }
+ 
++static int
++mtk_on_demand_filter(char *data, int proto)
++{
++	unsigned short udp_port=0;
++
++#if 0
++	char cmd;
++
++        printk("%02x%02x%02x%02x\n%02x%02x%02x%02x\n",data[2],data[3],data[4],data[5],data[6],data[7],data[8],data[9]);
++        printk("%02x%02x%02x%02x\n%02x%02x%02x%02x\n",data[10],data[11],data[12],data[13],data[14],data[15],data[16],data[17]);
++        printk("%02x%02x%02x%02x\n",data[18],data[19],data[20],data[21]);
++#endif
++
++    switch(proto)
++    {
++        case PPP_IP:
++            if ( data[11] == 0x2 )  /* IGMP */
++                return 0;
++            if ( data[11] == 0x1 )  /* ICMP */
++                return 0;
++            if ( data[11] == 0x11 ) { /* UDP */
++                udp_port= (data[24]<< 8) + data[25];
++                if ( udp_port == 123 ) { /* ntpclient */
++                    return 0;
++                }
++                if ( udp_port == 53 )
++                {
++                    if ( ((data[26]<< 8) + data[27]) >= 41 && data[47] == 'n' && data[48] == 'e' && data[49] == 't' && data[50] =='g' && data[51] =='e' && data[52] =='a' && data[53] =='r')
++                    return 0;
++                    if ( ((data[26]<< 8) + data[27]) >= 44 && data[50] == 'n' && data[51] == 'e' && data[52] == 't' && data[53] =='g' && data[54] =='e' && data[55] =='a' && data[56] =='r')
++                    return 0;
++                }
++                else if (udp_port == 520) { /* RIP */
++#if 0
++                cmd = data[30]; // 1=request, 2=reply
++                if ( data[30] == 1)
++#endif
++                    return 0;
++                }
++            }
++            break;
++        case PPP_IPV6:
++            if (0x3a == data[8] && 143 == data[42])  //icmpv6 0x3a == data[8]    //mld report 143 == data[42]
++            {
++                return 0;
++            }
++            if (0x11 == data[8])  /* UDP */
++            {
++                udp_port = (data[44] << 8) + data[45];  //if v6 not concern options, udp_port = (data[44] << 8) + data[45])
++                if (123 == udp_port)  /* ntpclient */
++                {
++                    return 0;
++                }
++                if (53 == udp_port)
++                {
++                    if ('r' == data[65] && 'o' == data[66] && 'o' == data[67] && 't' == data[68])
++                        return 0;
++                }
++                else if (520 == udp_port)  /* RIP */
++                {
++                    return 0;
++                }
++            }
++            break;
++        default:
++        break;
++    }
++    return 1;
++}
++
++
+ /*
+  * Compress and send a frame.
+  * The caller should have locked the xmit path,
+@@ -1288,6 +1357,21 @@ ppp_send_frame(struct ppp *ppp, struct s
+ 	struct sk_buff *new_skb;
+ 	int len;
+ 	unsigned char *cp;
++	int timestamp = 1;
++	unsigned char *data;
++
++	if (proto == PPP_IP)
++	{
++
++		data = skb->data;
++		timestamp = mtk_on_demand_filter(data, proto);
++	}
++	if (PPP_IPV6 == proto)
++	{
++
++		data = skb->data;
++		timestamp = mtk_on_demand_filter(data, proto);
++	}
+ 
+ 	if (proto < 0x8000) {
+ #ifdef CONFIG_PPP_FILTER
+@@ -1307,11 +1391,13 @@ ppp_send_frame(struct ppp *ppp, struct s
+ 		/* if this packet passes the active filter, record the time */
+ 		if (!(ppp->active_filter &&
+ 		      BPF_PROG_RUN(ppp->active_filter, skb) == 0))
+-			ppp->last_xmit = jiffies;
++			if (timestamp)
++				ppp->last_xmit = jiffies;
+ 		skb_pull(skb, 2);
+ #else
+ 		/* for data packets, record the time */
+-		ppp->last_xmit = jiffies;
++		if (timestamp)
++			ppp->last_xmit = jiffies;
+ #endif /* CONFIG_PPP_FILTER */
+ 	}
+ 
+@@ -1381,6 +1467,8 @@ ppp_send_frame(struct ppp *ppp, struct s
+ 	if (ppp->flags & SC_LOOP_TRAFFIC) {
+ 		if (ppp->file.rq.qlen > PPP_MAX_RQLEN)
+ 			goto drop;
++		if (!timestamp)
++			goto drop;
+ 		skb_queue_tail(&ppp->file.rq, skb);
+ 		wake_up_interruptible(&ppp->file.rwait);
+ 		return;
