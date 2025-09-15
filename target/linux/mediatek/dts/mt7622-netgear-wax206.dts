@@ -109,7 +109,7 @@
 	};
 
 	memory {
-		reg = <0 0x40000000 0 0x40000000>;
+		reg = <0 0x40000000 0 0x20000000>;  // RAM 512MB
 	};
 };
 
@@ -206,6 +206,7 @@
 			compatible = "ethernet-phy-ieee802.3-c45";
 			reg = <7>;
 			reset-gpios = <&pio 101 GPIO_ACTIVE_LOW>;
+
 			interrupts = <52 IRQ_TYPE_LEVEL_HIGH>;
 			reset-assert-us = <100000>;
 			reset-deassert-us = <100000>;
@@ -425,7 +426,7 @@
 
 			partition@2c0000 {
 				label = "firmware";
-				reg = <0x2c0000 0x2600000>;
+				reg = <0x2c0000 0xd100000>;  // 0xd100000 = 209MB
 
 				compatible = "fixed-partitions";
 				#address-cells = <1>;
@@ -433,78 +434,73 @@
 
 				partition@0 {
 					label = "kernel";
-					reg = <0x0 0x600000>;
+					reg = <0x0 0xe00000>;  // 0xe00000 = 14MB
 				};
 
-				partition@600000 {
+				partition@e00000 {
 					label = "ubi";
-					reg = <0x600000 0x2000000>;
+					reg = <0xe00000 0xc300000>;  // 0xc300000 ≈ 195MB
 				};
 			};
 
-			partition@28c0000 {
-				label = "firmware_backup";
-				reg = <0x28c0000 0x2600000>;
-				read-only;
-			};
 
-			partition@4ec0000 {
+			partition@d3c0000 {
 				label = "CFG";
-				reg = <0x4ec0000 0x800000>;
+				reg = <0xd3c0000 0x800000>;
 				read-only;
 			};
 
-			partition@56c0000 {
+			partition@dbc0000 {
 				label = "RAE";
-				reg = <0x56c0000 0x400000>;
+				reg = <0xdbc0000 0x400000>;
 				read-only;
 			};
 
-			partition@5ac0000 {
+			partition@dfc0000 {
 				label = "POT";
-				reg = <0x5ac0000 0x100000>;
+				reg = <0xdfc0000 0x100000>;
 				read-only;
 			};
 
-			partition@5bc0000 {
+			partition@e0c0000 {
 				label = "Language";
-				reg = <0x5bc0000 0x400000>;
+				reg = <0xe0c0000 0x400000>;
 				read-only;
 			};
 
-			partition@5fc0000 {
+			partition@e4c0000 {
 				label = "Traffic";
-				reg = <0x5fc0000 0x200000>;
+				reg = <0xe4c0000 0x200000>;
 				read-only;
 			};
 
-			partition@61c0000 {
+			partition@e6c0000 {
 				label = "Cert";
-				reg = <0x61c0000 0x100000>;
+				reg = <0xe6c0000 0x100000>;
 				read-only;
 			};
 
-			partition@62c0000 {
+			partition@e7c0000 {
 				label = "NTGRcryptK";
-				reg = <0x62c0000 0x100000>;
+				reg = <0xe7c0000 0x100000>;
 				read-only;
 			};
 
-			partition@63c0000 {
+			partition@e8c0000 {
 				label = "NTGRcryptD";
-				reg = <0x63c0000 0x500000>;
+				reg = <0xe8c0000 0x500000>;
 				read-only;
 			};
 
-			partition@68c0000 {
+			partition@edc0000 {
 				label = "LOG";
-				reg = <0x68c0000 0x100000>;
+				reg = <0xedc0000 0x100000>;
 				read-only;
 			};
 
-			partition@69c0000 {
+			partition@eec0000 {
 				label = "User_data";
-				reg = <0x69c0000 0x640000>;
+				reg = <0xeec0000 0x640000>;
 				read-only;
 			};
 
